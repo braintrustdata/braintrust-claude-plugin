@@ -2,8 +2,7 @@
 name: using-braintrust
 description: |
   Enables AI agents to use Braintrust for LLM evaluation, logging, and observability.
-  Provides correct API usage, working examples, and helper scripts for common operations.
-  Requires BRAINTRUST_API_KEY environment variable.
+  Includes ready-to-use scripts for querying logs, running evals, and logging data.
 version: 1.0.0
 ---
 
@@ -11,21 +10,69 @@ version: 1.0.0
 
 Braintrust is a platform for evaluating, logging, and monitoring LLM applications.
 
-## Quick start
+## Scripts (use these directly)
+
+This skill includes scripts that handle authentication and project resolution automatically.
+They load API keys from `.env` files in the current or parent directories.
+
+### Query logs
 
 ```bash
-# Install
-pip install braintrust autoevals
+# Get logs from the last 24 hours
+uv run query_logs.py --project "Loop logs" --last-day
 
-# Set API key
-export BRAINTRUST_API_KEY="your-api-key"
+# Count logs from the last day
+uv run query_logs.py --project "Loop logs" --last-day --count
+
+# Custom query
+uv run query_logs.py --project "My Project" --filter "metadata.user_id = 'user123'" --limit 20
+
+# Output as JSON
+uv run query_logs.py --project "My Project" --format json
 ```
 
-## Core APIs
+### Log data
 
-### Running evaluations with `Eval()`
+```bash
+# Log a single entry
+uv run log_data.py --project "My Project" --input "hello" --output "world"
 
-**IMPORTANT**: The first argument is the project name (positional), not a keyword argument.
+# Log with metadata
+uv run log_data.py --project "My Project" --input "query" --output "response" \
+  --metadata '{"user_id": "123"}'
+
+# Batch log from JSON
+uv run log_data.py --project "My Project" --data '[{"input": "a", "output": "b"}]'
+```
+
+### Run evaluations
+
+```bash
+# Run eval with inline data
+uv run run_eval.py --project "My Project" --data '[{"input": "test", "expected": "test"}]'
+
+# Run eval from file
+uv run run_eval.py --project "My Project" --data-file test_cases.json
+
+# Use factuality scorer
+uv run run_eval.py --project "My Project" --data-file data.json --scorer factuality
+```
+
+## Setup
+
+Create a `.env` file in your project directory:
+
+```
+BRAINTRUST_API_KEY=your-api-key-here
+```
+
+The scripts automatically find and load `.env` files from the current directory or any parent directory.
+
+## Writing evaluation code
+
+When users need custom evaluation logic, use the SDK directly.
+
+**IMPORTANT**: The first argument to `Eval()` is the project name (positional), not a keyword argument.
 
 ```python
 import braintrust
@@ -36,258 +83,58 @@ braintrust.Eval(
     "My Project",  # Project name (required, positional)
     data=lambda: [
         {"input": "What is 2+2?", "expected": "4"},
-        {"input": "What is the capital of France?", "expected": "Paris"},
     ],
-    task=lambda input: my_llm_call(input["input"]),  # Returns string
-    scores=[Factuality],  # List of scorer functions
+    task=lambda input: my_llm_call(input),
+    scores=[Factuality],
 )
 ```
 
 **Common mistakes:**
-- ❌ `Eval(project_name="My Project", ...)` - Wrong! No `project_name` kwarg
-- ❌ `Eval(name="My Project", ...)` - Wrong! No `name` kwarg
+- ❌ `Eval(project_name="My Project", ...)` - Wrong!
+- ❌ `Eval(name="My Project", ...)` - Wrong!
 - ✅ `Eval("My Project", data=..., task=..., scores=...)` - Correct!
 
-### Data format
-
-Each item in data must have an `input` key. Optional: `expected`, `metadata`.
+### Custom scorers
 
 ```python
-data = [
-    {
-        "input": {"question": "What is AI?"},  # Can be string or dict
-        "expected": "Artificial Intelligence",  # Optional, for comparison
-        "metadata": {"category": "basics"},    # Optional
-    },
-]
-```
+from autoevals import Score
 
-### Task function
-
-The task function receives `input` and should return the output to evaluate:
-
-```python
-def my_task(input):
-    # input is the "input" field from your data
-    question = input["question"] if isinstance(input, dict) else input
-    response = call_llm(question)
-    return response  # Return string or dict
-```
-
-### Scorers
-
-Scorers evaluate the output. Use autoevals or create custom scorers:
-
-```python
-from autoevals import Factuality, Score
-
-# Using autoevals (recommended)
-scores = [Factuality]
-
-# Custom scorer - must return Score object
 def my_scorer(input, output, expected=None, **kwargs):
     is_correct = expected and expected.lower() in output.lower()
     return Score(
         name="Contains Expected",
         score=1.0 if is_correct else 0.0,
-        metadata={"expected": expected},
     )
-
-scores = [Factuality, my_scorer]
 ```
 
-### Logging with `init_logger()`
-
-For production logging (not evals):
+## Writing logging code
 
 ```python
 import braintrust
 
-# Initialize logger
 logger = braintrust.init_logger(project="My Project")
 
-# Log an LLM call
 logger.log(
     input="What is the weather?",
     output="It's sunny today",
-    metadata={"user_id": "123", "session_id": "abc"},
-    scores={"relevance": 0.9},
+    metadata={"user_id": "123"},
 )
 
-# IMPORTANT: Flush to ensure logs are sent
+# IMPORTANT: Always flush
 logger.flush()
 ```
 
 ### Tracing with spans
 
-For detailed tracing of multi-step operations:
-
 ```python
-import braintrust
-
 logger = braintrust.init_logger(project="My Project")
 
-# Create a traced span
 with logger.start_span(name="process_request") as span:
     span.log(input={"query": "hello"})
-
-    # Nested span
-    with span.start_span(name="llm_call") as llm_span:
-        result = call_llm("hello")
-        llm_span.log(output=result)
-
-    span.log(output={"response": result})
+    result = call_llm("hello")
+    span.log(output=result)
 
 logger.flush()
-```
-
-## Working examples
-
-### Example 1: Simple Q&A evaluation
-
-```python
-import braintrust
-from autoevals import Factuality
-
-def answer_question(input):
-    # Your LLM call here
-    return f"The answer to '{input}' is 42"
-
-braintrust.Eval(
-    "QA Evaluation",
-    data=lambda: [
-        {"input": "What is 6 times 7?", "expected": "42"},
-        {"input": "What is the meaning of life?", "expected": "42"},
-    ],
-    task=answer_question,
-    scores=[Factuality],
-)
-```
-
-### Example 2: Custom scorer
-
-```python
-import braintrust
-from autoevals import Score
-
-def length_scorer(input, output, **kwargs):
-    """Score based on output length."""
-    length = len(output) if output else 0
-    score = min(1.0, length / 100)  # Normalize to 0-1
-    return Score(name="Length", score=score, metadata={"length": length})
-
-def summarize(input):
-    return input[:50] + "..."  # Simple truncation
-
-braintrust.Eval(
-    "Summarization",
-    data=lambda: [
-        {"input": "This is a long paragraph that needs summarizing..." * 10},
-    ],
-    task=summarize,
-    scores=[length_scorer],
-)
-```
-
-### Example 3: Logging production data
-
-```python
-import braintrust
-
-logger = braintrust.init_logger(project="Production App")
-
-def handle_request(user_query):
-    response = call_llm(user_query)
-
-    # Log the interaction
-    logger.log(
-        input=user_query,
-        output=response,
-        metadata={
-            "user_id": get_user_id(),
-            "timestamp": get_timestamp(),
-        },
-    )
-    logger.flush()
-
-    return response
-```
-
-### Example 4: Using with OpenAI
-
-```python
-import braintrust
-from openai import OpenAI
-
-# Wrap the client for automatic tracing
-client = braintrust.wrap_openai(OpenAI())
-
-logger = braintrust.init_logger(project="OpenAI App")
-
-with logger.start_span(name="chat"):
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": "Hello!"}],
-    )
-    print(response.choices[0].message.content)
-
-logger.flush()
-```
-
-## Helper scripts
-
-This skill includes helper scripts in the `scripts/` directory:
-
-- `scripts/run_eval.py` - Run an evaluation with custom data and scorers
-- `scripts/log_data.py` - Log data to a project
-- `scripts/query_logs.py` - Query logs using BTQL
-
-Run scripts with:
-```bash
-uv run scripts/run_eval.py --project "My Project" --data data.json
-```
-
-## API reference
-
-### `braintrust.Eval()`
-```python
-Eval(
-    name: str,                    # Project name (required, positional)
-    data: Callable | list,        # Data or function returning data
-    task: Callable,               # Function to evaluate
-    scores: list[Callable],       # List of scorer functions
-    experiment_name: str = None,  # Optional experiment name
-    metadata: dict = None,        # Optional metadata
-)
-```
-
-### `braintrust.init_logger()`
-```python
-init_logger(
-    project: str,                 # Project name (required)
-    api_key: str = None,          # API key (uses env var if not provided)
-) -> Logger
-```
-
-### `logger.log()`
-```python
-logger.log(
-    input: Any = None,            # Input data
-    output: Any = None,           # Output data
-    expected: Any = None,         # Expected output
-    metadata: dict = None,        # Metadata
-    scores: dict = None,          # Scores dict {"name": value}
-    tags: list[str] = None,       # Tags
-)
-```
-
-### `Score` (from autoevals)
-```python
-Score(
-    name: str,                    # Score name
-    score: float,                 # Score value (0-1)
-    metadata: dict = None,        # Optional metadata
-)
 ```
 
 ## Common issues
@@ -296,10 +143,7 @@ Score(
 Use positional argument: `Eval("My Project", ...)` not `Eval(project_name="My Project")`
 
 ### Logs not appearing
-Call `logger.flush()` after logging to ensure data is sent.
-
-### Import errors
-Install required packages: `pip install braintrust autoevals`
+Call `logger.flush()` after logging.
 
 ### Authentication errors
-Set `BRAINTRUST_API_KEY` environment variable or pass `api_key` parameter.
+Create a `.env` file with `BRAINTRUST_API_KEY=your-key` or set the environment variable.

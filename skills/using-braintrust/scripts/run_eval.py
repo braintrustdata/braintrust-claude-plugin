@@ -1,22 +1,39 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["braintrust", "autoevals"]
+# dependencies = ["braintrust", "autoevals", "python-dotenv"]
 # ///
 """
 Run a Braintrust evaluation with custom data.
 
 Usage:
-    uv run scripts/run_eval.py --project "My Project" --data '[{"input": "test", "expected": "test"}]'
-    uv run scripts/run_eval.py --project "My Project" --data-file data.json
+    uv run run_eval.py --project "My Project" --data '[{"input": "test", "expected": "test"}]'
+    uv run run_eval.py --project "My Project" --data-file data.json
 """
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 
-import braintrust
-from autoevals import Factuality, Score
+from dotenv import load_dotenv
+
+
+def load_api_key() -> None:
+    """Load API key from environment or .env file."""
+    # Try loading .env from current directory and parent directories
+    for path in [Path.cwd(), *Path.cwd().parents]:
+        env_file = path / ".env"
+        if env_file.exists():
+            load_dotenv(env_file)
+            break
+
+    if not os.environ.get("BRAINTRUST_API_KEY"):
+        print("Error: BRAINTRUST_API_KEY not found.", file=sys.stderr)
+        print("Set it via environment variable or create a .env file with:", file=sys.stderr)
+        print('  BRAINTRUST_API_KEY="your-api-key"', file=sys.stderr)
+        sys.exit(1)
 
 
 def simple_task(input_data):
@@ -24,19 +41,6 @@ def simple_task(input_data):
     if isinstance(input_data, dict):
         return str(input_data.get("input", input_data))
     return str(input_data)
-
-
-def exact_match_scorer(input, output, expected=None, **kwargs):
-    """Scorer that checks for exact match with expected."""
-    if expected is None:
-        return Score(name="Exact Match", score=1.0, metadata={"reason": "no expected"})
-
-    match = str(output).strip().lower() == str(expected).strip().lower()
-    return Score(
-        name="Exact Match",
-        score=1.0 if match else 0.0,
-        metadata={"output": str(output)[:100], "expected": str(expected)[:100]},
-    )
 
 
 def main():
@@ -49,6 +53,24 @@ def main():
         "--scorer", default="exact", choices=["exact", "factuality"], help="Scorer to use"
     )
     args = parser.parse_args()
+
+    load_api_key()
+
+    # Import after loading env so braintrust picks up the key
+    import braintrust
+    from autoevals import Factuality, Score
+
+    def exact_match_scorer(input, output, expected=None, **kwargs):
+        """Scorer that checks for exact match with expected."""
+        if expected is None:
+            return Score(name="Exact Match", score=1.0, metadata={"reason": "no expected"})
+
+        match = str(output).strip().lower() == str(expected).strip().lower()
+        return Score(
+            name="Exact Match",
+            score=1.0 if match else 0.0,
+            metadata={"output": str(output)[:100], "expected": str(expected)[:100]},
+        )
 
     # Load data
     if args.data:
