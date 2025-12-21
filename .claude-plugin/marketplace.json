@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    {
+      "name": "braintrust",
+      "description": "Enables AI agents to use Braintrust for LLM evaluation, logging, and observability. Provides correct API usage, working examples, and helper scripts.",
+      "path": "."
+    }
+  ]
+}
