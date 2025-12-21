@@ -12,7 +12,7 @@
       "name": "braintrust",
       "description": "Enables AI agents to use Braintrust for LLM evaluation, logging, and observability. Provides correct API usage, working examples, and helper scripts.",
       "version": "1.0.0",
-      "source": ".",
+      "source": "./",
       "category": "development"
     }
   ]
