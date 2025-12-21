@@ -1,49 +1,63 @@
-# Braintrust Skill
+# Braintrust Claude Plugin
 
-A skill that enables AI agents to use Braintrust for LLM evaluation, logging, and observability.
+A Claude Code plugin that enables AI agents to use Braintrust for LLM evaluation, logging, and observability.
 
-## Installing the Skill
+## Installation
 
-### Claude Code / Claude Agent SDK
+```bash
+claude plugin marketplace add braintrustdata/braintrust-claude-plugin
+claude plugin install braintrust@braintrust-claude-plugin
+```
+
+Or via the interactive UI:
+```
+/plugin marketplace add braintrustdata/braintrust-claude-plugin
+/plugin install braintrust@braintrust-claude-plugin
+```
+
+## Agent Skills
+
+This repo also includes a [Braintrust skill](skills/using-braintrust/SKILL.md) built on the open [Agent Skills](https://agentskills.io/home) format, compatible with Claude Code, Cursor, Amp, and other agents.
 
 **One-liner:**
 ```bash
-mkdir -p ~/.claude/skills && curl -sL https://github.com/braintrustdata/braintrust-skill/archive/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 braintrust-skill-main/skill && mv ~/.claude/skills/skill ~/.claude/skills/braintrust
+curl -sL https://github.com/braintrustdata/braintrust-claude-plugin/archive/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 braintrust-claude-plugin-main/skills
 ```
 
-**Or clone and copy:**
+## Setup
+
+Create a `.env` file in your project directory:
+
+```
+BRAINTRUST_API_KEY=your-api-key-here
+```
+
+The plugin scripts automatically load `.env` files from the current directory or parent directories.
+
+## What the Plugin Provides
+
+### Scripts
+
+The plugin includes ready-to-use scripts for common operations:
+
+**Query logs with BTQL:**
 ```bash
-git clone https://github.com/braintrustdata/braintrust-skill.git /tmp/braintrust-skill
-cp -r /tmp/braintrust-skill/skill ~/.claude/skills/braintrust
+uv run query_logs.py --project "My Project" --query "select: count(1) as count | filter: created > now() - interval 1 day"
 ```
 
-Claude automatically discovers skills in `~/.claude/skills/` by looking for directories containing `SKILL.md`.
+**Log data:**
+```bash
+uv run log_data.py --project "My Project" --input "hello" --output "world"
+```
 
-### Claude.ai (web)
+**Run evaluations:**
+```bash
+uv run run_eval.py --project "My Project" --data '[{"input": "test", "expected": "test"}]'
+```
 
-1. Download this repo as a ZIP file
-2. Go to **Settings > Features** in Claude.ai
-3. Upload the ZIP file under "Custom Skills"
+### SDK Patterns
 
-### Other AI agents
-
-Copy the contents of [`skill/SKILL.md`](skill/SKILL.md) into your agent's system prompt.
-
-### Requirements
-
-- `BRAINTRUST_API_KEY` environment variable
-- Python packages: `braintrust`, `autoevals` (Claude will install these automatically)
-
-## What the Skill Provides
-
-The skill teaches AI agents how to:
-
-1. **Run evaluations** with `braintrust.Eval()`
-2. **Log data** with `braintrust.init_logger()`
-3. **Use scorers** from `autoevals` (Factuality, etc.)
-4. **Query logs** with BTQL
-
-### Key API patterns
+The skill teaches Claude how to use the Braintrust SDK correctly:
 
 ```python
 # Correct Eval() usage - project name is FIRST POSITIONAL arg
@@ -60,33 +74,33 @@ logger.log(input="hello", output="world")
 logger.flush()  # Important!
 ```
 
+### BTQL Query Syntax
+
+The skill teaches Claude to write BTQL queries:
+
+```
+select: input, output, created | filter: created > now() - interval 1 day | limit: 10
+```
+
 ## Project Structure
 
 ```
-braintrust-skill/
-├── skill/                  # The skill itself
-│   ├── SKILL.md           # Main skill documentation
-│   └── scripts/           # Helper scripts
-│       ├── run_eval.py
-│       ├── log_data.py
-│       └── query_logs.py
+braintrust-claude-plugin/
+├── .claude-plugin/
+│   ├── plugin.json         # Plugin manifest
+│   └── marketplace.json    # Marketplace index
+├── skills/
+│   └── using-braintrust/
+│       ├── SKILL.md        # Main skill documentation
+│       └── scripts/        # Helper scripts
+│           ├── query_logs.py
+│           ├── log_data.py
+│           └── run_eval.py
 ├── evals/                  # Evaluation suite
-│   ├── eval_e2e_*.py      # End-to-end tests
-│   └── eval_*.py          # Other evals
-├── EVAL_RESULTS.md        # Skill impact analysis
+│   ├── eval_e2e_*.py       # End-to-end tests
+│   └── eval_*.py           # Baseline tests
 └── README.md
 ```
-
-## Eval Results
-
-The skill was developed using evaluation-driven development. Results:
-
-| Eval | Before Skill | After Skill |
-|------|--------------|-------------|
-| Log Fetch - Task Completed | 67% | **100%** |
-| Experiment - Task Completed | 0% | **100%** |
-
-See [EVAL_RESULTS.md](EVAL_RESULTS.md) for details.
 
 ## Development
 
@@ -95,36 +109,43 @@ See [EVAL_RESULTS.md](EVAL_RESULTS.md) for details.
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
 
-### Setup
+### Local Testing
+
+Test the plugin without installing from marketplace:
 
 ```bash
-# Install dev tools
-uv sync --group dev
-
-# Install pre-commit hooks
-uv run pre-commit install
+claude --plugin-dir /path/to/braintrust-claude-plugin
 ```
 
 ### Running Evals
 
+The `evals/` directory contains tests that verify the skill works correctly (e.g., Claude generates valid BTQL queries, logs data properly).
+
 ```bash
-# Set your API key
+cd evals
 export BRAINTRUST_API_KEY="your-key"
 
 # Run all evals
-uv run braintrust eval evals/
+uv run braintrust eval .
 
 # Run specific eval
-uv run braintrust eval evals/eval_e2e_log_fetch.py
+uv run braintrust eval eval_e2e_log_fetch.py
 ```
 
 ### Pre-commit Hooks
 
-- **ruff** - Linter with auto-fix
-- **ruff-format** - Code formatter
-- **ty** - Type checker
-
 ```bash
+# Install hooks
+uv run pre-commit install
+
 # Run all hooks
 uv run pre-commit run --all-files
 ```
+
+## Updating the Plugin
+
+After making changes:
+
+1. Bump version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+2. Commit and push
+3. Users update with: `claude plugin marketplace update braintrust-claude-plugin`
