@@ -40,9 +40,9 @@ The plugin scripts automatically load `.env` files from the current directory or
 
 The plugin includes ready-to-use scripts for common operations:
 
-**Query logs with BTQL:**
+**Query logs with SQL:**
 ```bash
-uv run query_logs.py --project "My Project" --query "select: count(1) as count | filter: created > now() - interval 1 day"
+uv run query_logs.py --project "My Project" --query "SELECT count(*) as count FROM logs WHERE created > now() - interval 1 day"
 ```
 
 **Log data:**
@@ -74,13 +74,17 @@ logger.log(input="hello", output="world")
 logger.flush()  # Important!
 ```
 
-### BTQL Query Syntax
+### SQL Query Syntax
 
-The skill teaches Claude to write BTQL queries:
+The skill teaches Claude to write SQL queries for Braintrust logs:
 
+```sql
+SELECT input, output, created FROM logs WHERE created > now() - interval 1 day LIMIT 10
 ```
-select: input, output, created | filter: created > now() - interval 1 day | limit: 10
-```
+
+**SQL quirks in Braintrust:**
+- Use `hour()`, `day()`, `month()`, `year()` instead of `date_trunc()`
+- Intervals use format `interval 1 day` (no quotes, singular unit)
 
 ## Project Structure
 
@@ -119,7 +123,7 @@ claude --plugin-dir /path/to/braintrust-claude-plugin
 
 ### Running Evals
 
-The `evals/` directory contains tests that verify the skill works correctly (e.g., Claude generates valid BTQL queries, logs data properly).
+The `evals/` directory contains tests that verify the skill works correctly (e.g., Claude generates valid SQL queries, logs data properly).
 
 ```bash
 cd evals

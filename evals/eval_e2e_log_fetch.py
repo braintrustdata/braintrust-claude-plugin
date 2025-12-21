@@ -3,7 +3,7 @@ Braintrust skill eval: end-to-end log and fetch
 
 Tests Claude's ability to actually execute code that:
 1. Logs data to Braintrust
-2. Fetches the logs back using BTQL
+2. Fetches the logs back using SQL
 3. Verifies the data matches
 
 Verification is done by querying Braintrust directly, not trusting Claude's output.
@@ -70,18 +70,18 @@ def get_or_create_project(project_name: str) -> str | None:
 
 
 def query_project_logs(project_id: str, test_id: str | None = None) -> list[dict]:
-    """Query project logs from Braintrust using BTQL."""
+    """Query project logs from Braintrust using SQL."""
     api_key = os.environ.get("BRAINTRUST_API_KEY")
     if not api_key or not project_id:
         return []
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Build query - filter by test_id if provided
+    # Build SQL query - filter by test_id if provided
     if test_id:
-        query = f"from: project_logs(\"{project_id}\") | select: id, created, input, output, metadata, scores | filter: metadata.test_id = '{test_id}' | limit: 100"
+        query = f"SELECT id, created, input, output, metadata, scores FROM project_logs('{project_id}') WHERE metadata.test_id = '{test_id}' LIMIT 100"
     else:
-        query = f'from: project_logs("{project_id}") | select: id, created, input, output, metadata, scores | limit: 100'
+        query = f"SELECT id, created, input, output, metadata, scores FROM project_logs('{project_id}') LIMIT 100"
 
     resp = requests.post(
         "https://api.braintrust.dev/btql",
@@ -312,7 +312,7 @@ Complete this task using Python code execution:
 
 {input_data["task"]}
 
-Important: Use BTQL (Braintrust Query Language) syntax for queries.
+Important: Use SQL syntax for queries against Braintrust logs.
 Execute the code, don't just show it.
 """
 
@@ -328,38 +328,37 @@ Execute the code, don't just show it.
     }
 
 
-def btql_query_scorer(output: dict, expected: dict, **kwargs) -> Score:
+def sql_query_scorer(output: dict, expected: dict, **kwargs) -> Score:
     """
-    Scorer that checks if Claude used proper BTQL query syntax.
+    Scorer that checks if Claude used proper SQL query syntax.
     """
     output_text = output if isinstance(output, str) else output.get("output", "")
 
-    # Check for BTQL patterns
-    has_btql_select = "select:" in output_text.lower()
-    has_btql_filter = "filter:" in output_text.lower()
-    has_btql_from = "from:" in output_text.lower() or "project_logs" in output_text.lower()
-    has_interval = "interval" in output_text.lower() and "day" in output_text.lower()
+    # Check for SQL patterns
+    has_select = "select" in output_text.lower()
+    has_from = "from" in output_text.lower()
+    has_where = "where" in output_text.lower()
+    has_interval = "interval" in output_text.lower()
     has_count = "count(" in output_text.lower()
 
-    # Check for anti-patterns (convenience flags we removed)
-    has_convenience_flags = "--last-day" in output_text or "--count" in output_text
+    # Check for anti-patterns (old BTQL syntax)
+    has_btql_syntax = "select:" in output_text.lower() or "filter:" in output_text.lower()
 
-    # Score based on BTQL usage
-    btql_indicators = sum(
-        [has_btql_select, has_btql_filter, has_btql_from, has_interval, has_count]
-    )
-    score = min(1.0, btql_indicators / 3) if not has_convenience_flags else 0.5
+    # Score based on SQL usage
+    sql_indicators = sum([has_select, has_from, has_where, has_interval, has_count])
+    base_score = min(1.0, sql_indicators / 3)
+    score = base_score * 0.5 if has_btql_syntax else base_score
 
     return Score(
-        name="BTQL Query",
+        name="SQL Query",
         score=score,
         metadata={
-            "has_btql_select": has_btql_select,
-            "has_btql_filter": has_btql_filter,
-            "has_btql_from": has_btql_from,
+            "has_select": has_select,
+            "has_from": has_from,
+            "has_where": has_where,
             "has_interval": has_interval,
             "has_count": has_count,
-            "has_convenience_flags": has_convenience_flags,
+            "has_btql_syntax": has_btql_syntax,
         },
     )
 
@@ -399,7 +398,7 @@ E2E_LOG_FETCH_DATA = [
 E2E_QUERY_DATA = [
     {
         "input": {
-            "task": "Query the 'Loop logs' project in Braintrust. How many logs were created in the last day? Use a BTQL query with count().",
+            "task": "Query the 'Loop logs' project in Braintrust. How many logs were created in the last day? Use a SQL query with count().",
         },
         "expected": {},
         "metadata": {
@@ -431,9 +430,9 @@ Eval(
     "Braintrust Skill - E2E Log Query",
     data=lambda: E2E_QUERY_DATA,
     task=lambda input: e2e_query_task(input),
-    scores=[btql_query_scorer, task_completed_scorer],
+    scores=[sql_query_scorer, task_completed_scorer],
     metadata={
-        "description": "Tests Claude's ability to query logs using BTQL syntax",
+        "description": "Tests Claude's ability to query logs using SQL syntax",
         "skill": "using-braintrust",
         "category": "e2e",
         "test_run_id": TEST_RUN_ID,

@@ -2,7 +2,7 @@
 name: using-braintrust
 description: |
   Enables AI agents to use Braintrust for LLM evaluation, logging, and observability.
-  Includes scripts for querying logs with BTQL, running evals, and logging data.
+  Includes scripts for querying logs with SQL, running evals, and logging data.
 version: 1.0.0
 ---
 
@@ -10,74 +10,78 @@ version: 1.0.0
 
 Braintrust is a platform for evaluating, logging, and monitoring LLM applications.
 
-## Querying logs with BTQL
+## Querying logs with SQL
 
-Use the `query_logs.py` script to run BTQL (Braintrust Query Language) queries.
+Use the `query_logs.py` script to run SQL queries against Braintrust logs.
 
-**Always share the BTQL query you used** when reporting results, so the user understands what was executed.
+**Always share the SQL query you used** when reporting results, so the user understands what was executed.
 
 **Script location:** `scripts/query_logs.py` (relative to this file)
 
 **Run from the user's project directory** (where `.env` with `BRAINTRUST_API_KEY` exists):
 
 ```bash
-uv run /path/to/scripts/query_logs.py --project "Project Name" --query "BTQL_QUERY"
-```
-
-### BTQL syntax
-
-BTQL uses pipe-separated clauses:
-
-```
-select: FIELDS | filter: CONDITIONS | sort: FIELD asc/desc | limit: N
+uv run /path/to/scripts/query_logs.py --project "Project Name" --query "SQL_QUERY"
 ```
 
 ### Common queries
 
 **Count logs from last 24 hours:**
-```bash
---query "select: count(1) as count | filter: created > now() - interval 1 day"
+```sql
+SELECT count(*) as count FROM logs WHERE created > now() - interval 1 day
 ```
 
 **Get recent logs:**
-```bash
---query "select: input, output, created | sort: created desc | limit: 10"
+```sql
+SELECT input, output, created FROM logs ORDER BY created DESC LIMIT 10
 ```
 
 **Filter by metadata:**
-```bash
---query "select: input, output | filter: metadata.user_id = 'user123' | limit: 20"
+```sql
+SELECT input, output FROM logs WHERE metadata.user_id = 'user123' LIMIT 20
 ```
 
 **Filter by time range:**
-```bash
---query "select: * | filter: created > now() - interval 7 day | limit: 50"
+```sql
+SELECT * FROM logs WHERE created > now() - interval 7 day LIMIT 50
 ```
 
 **Aggregate by field:**
-```bash
---query "dimensions: metadata.model | measures: count(1) as count"
+```sql
+SELECT metadata.model, count(*) as count FROM logs GROUP BY metadata.model
 ```
 
-### BTQL reference
+**Group by hour:**
+```sql
+SELECT hour(created) as hr, count(*) as count FROM logs GROUP BY hour(created)
+```
 
-**Select clause:**
-- `select: *` - all fields
-- `select: input, output, created` - specific fields
-- `select: count(1) as count` - aggregation
+### SQL quirks in Braintrust
 
-**Filter operators:**
+- **Time functions**: Use `hour()`, `day()`, `month()`, `year()` instead of `date_trunc()`
+  - ✅ `hour(created)`
+  - ❌ `date_trunc('hour', created)`
+- **Intervals**: Use `interval 1 day`, `interval 7 day`, `interval 1 hour` (no quotes, singular unit)
+- **Nested fields**: Use dot notation: `metadata.user_id`, `scores.Factuality`, `metrics.duration`
+- **Table name**: Always use `FROM logs` (the script handles project scoping)
+
+### SQL reference
+
+**Operators:**
 - `=`, `!=`, `>`, `<`, `>=`, `<=`
 - `IS NULL`, `IS NOT NULL`
 - `LIKE 'pattern%'`
 - `AND`, `OR`, `NOT`
 
+**Aggregations:**
+- `count(*)`, `count(field)`
+- `avg(field)`, `sum(field)`
+- `min(field)`, `max(field)`
+
 **Time filters:**
 - `created > now() - interval 1 day`
 - `created > now() - interval 7 day`
 - `created > now() - interval 1 hour`
-
-**Nested fields:** Use dot notation: `metadata.user_id`, `scores.Factuality`
 
 ## Logging data
 

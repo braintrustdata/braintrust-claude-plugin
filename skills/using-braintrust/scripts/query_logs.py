@@ -4,16 +4,17 @@
 # dependencies = ["requests", "python-dotenv"]
 # ///
 """
-Execute a BTQL query against Braintrust project logs.
+Execute a SQL query against Braintrust project logs.
 
 Usage:
-    uv run query_logs.py --project "My Project" --query "select: input, output | limit: 10"
-    uv run query_logs.py --project "My Project" --query "select: count(1) as count | filter: created > now() - interval 1 day"
+    uv run query_logs.py --project "My Project" --query "SELECT input, output FROM logs LIMIT 10"
+    uv run query_logs.py --project "My Project" --query "SELECT count(*) as count FROM logs WHERE created > now() - interval '1 day'"
 """
 
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -68,10 +69,14 @@ def get_project_id(project_name: str, api_key: str) -> str:
     sys.exit(1)
 
 
-def run_btql(project_id: str, query: str, api_key: str) -> list[dict]:
-    """Execute BTQL query."""
+def run_sql(project_id: str, query: str, api_key: str) -> list[dict]:
+    """Execute SQL query against Braintrust logs."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    full_query = f'from: project_logs("{project_id}") | {query}'
+
+    # Replace "FROM logs" with the project-scoped source
+    full_query = re.sub(
+        r"\bFROM\s+logs\b", f"FROM project_logs('{project_id}')", query, flags=re.IGNORECASE
+    )
 
     resp = requests.post(
         "https://api.braintrust.dev/btql",
@@ -87,9 +92,11 @@ def run_btql(project_id: str, query: str, api_key: str) -> list[dict]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Execute BTQL query against Braintrust logs")
+    parser = argparse.ArgumentParser(description="Execute SQL query against Braintrust logs")
     parser.add_argument("--project", required=True, help="Project name")
-    parser.add_argument("--query", required=True, help="BTQL query (after the from clause)")
+    parser.add_argument(
+        "--query", required=True, help="SQL query (use 'FROM logs' for the project)"
+    )
     parser.add_argument(
         "--format", choices=["json", "table"], default="table", help="Output format"
     )
@@ -97,7 +104,14 @@ def main():
 
     api_key = load_api_key()
     project_id = get_project_id(args.project, api_key)
-    results = run_btql(project_id, args.query, api_key)
+
+    # Show the SQL query being executed
+    executed_query = re.sub(
+        r"\bFROM\s+logs\b", f"FROM project_logs('{project_id}')", args.query, flags=re.IGNORECASE
+    )
+    print(f"Executing SQL: {executed_query}\n", file=sys.stderr)
+
+    results = run_sql(project_id, args.query, api_key)
 
     if args.format == "json":
         print(json.dumps(results, indent=2, default=str))

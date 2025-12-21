@@ -1,7 +1,7 @@
 """
 Braintrust skill eval: log writing and querying
 
-Tests the agent's ability to write logs to Braintrust and query them using BTQL.
+Tests the agent's ability to write logs to Braintrust and query them using SQL.
 
 Run with: braintrust eval evals/eval_log_querying.py
 """
@@ -30,7 +30,7 @@ def baseline_task(input_data):
         system="""You are a helpful assistant that helps users work with Braintrust,
 an LLM evaluation and observability platform.
 
-When asked to perform operations, provide the exact code or BTQL queries needed.
+When asked to perform operations, provide the exact code or SQL queries needed.
 Be specific and executable in your responses.""",
         messages=[{"role": "user", "content": query}],
     )
@@ -39,51 +39,51 @@ Be specific and executable in your responses.""",
 
 # Log querying test cases with natural language criteria
 LOG_QUERYING_DATA = [
-    # BTQL query construction
+    # SQL query construction
     {
-        "input": "Write a BTQL query to find all logs from the last 24 hours where the Factuality score is below 0.5",
+        "input": "Write a SQL query to find all logs from the last 24 hours where the Factuality score is below 0.5",
         "expected": [
-            "Uses filter clause with scores.Factuality < 0.5",
+            "Uses WHERE clause with scores.Factuality < 0.5",
             "Filters by time using created field with interval or time function",
-            "Uses BTQL syntax (not generic SQL like WHERE/FROM)",
+            "Uses standard SQL syntax (SELECT, FROM, WHERE)",
         ],
-        "metadata": {"category": "btql_query", "difficulty": "medium"},
+        "metadata": {"category": "sql_query", "difficulty": "medium"},
     },
     {
-        "input": "Write a BTQL query to calculate average token usage per day for the last week",
+        "input": "Write a SQL query to calculate average token usage per day for the last week. Note: Braintrust uses day() function instead of date_trunc.",
         "expected": [
-            "Uses dimensions clause with day(created) for time grouping",
-            "Uses measures clause with avg() for aggregation",
+            "Uses GROUP BY with day(created) for time grouping",
+            "Uses avg() for aggregation",
             "References metrics.total_tokens or similar token field",
         ],
-        "metadata": {"category": "btql_query", "difficulty": "hard"},
+        "metadata": {"category": "sql_query", "difficulty": "hard"},
     },
     {
-        "input": "Write a BTQL query to find the top 10 most expensive API calls by token count",
+        "input": "Write a SQL query to find the top 10 most expensive API calls by token count",
         "expected": [
             "References metrics.total_tokens or similar token field",
-            "Uses sort with desc for descending order",
-            "Uses limit to restrict to 10 results",
+            "Uses ORDER BY with DESC for descending order",
+            "Uses LIMIT to restrict to 10 results",
         ],
-        "metadata": {"category": "btql_query", "difficulty": "medium"},
+        "metadata": {"category": "sql_query", "difficulty": "medium"},
     },
     {
-        "input": "Write a BTQL query to group logs by model and calculate average Factuality score for each",
+        "input": "Write a SQL query to group logs by model and calculate average Factuality score for each",
         "expected": [
-            "Uses dimensions clause with metadata.model for grouping",
-            "Uses measures clause with avg(scores.Factuality)",
+            "Uses GROUP BY with metadata.model for grouping",
+            "Uses avg(scores.Factuality) for aggregation",
             "Produces one row per distinct model",
         ],
-        "metadata": {"category": "btql_query", "difficulty": "hard"},
+        "metadata": {"category": "sql_query", "difficulty": "hard"},
     },
     {
-        "input": "Write a BTQL query to find logs where the output contains the word 'error'",
+        "input": "Write a SQL query to find logs where the output contains the word 'error'",
         "expected": [
-            "Uses filter clause on output field",
-            "Uses ILIKE, LIKE, or MATCH for text matching",
+            "Uses WHERE clause on output field",
+            "Uses ILIKE, LIKE, or similar for text matching",
             "Includes the search term 'error'",
         ],
-        "metadata": {"category": "btql_query", "difficulty": "medium"},
+        "metadata": {"category": "sql_query", "difficulty": "medium"},
     },
     # Log writing (code generation)
     {
@@ -107,13 +107,13 @@ LOG_QUERYING_DATA = [
     },
     # Complex queries
     {
-        "input": "Write a BTQL query to find logs where latency (metrics.duration) is greater than 5 seconds and group them by hour",
+        "input": "Write a SQL query to find logs where latency (metrics.duration) is greater than 5 seconds and group them by hour. Note: Braintrust uses hour() function instead of date_trunc.",
         "expected": [
-            "Uses filter with metrics.duration > 5 (or 5000 for ms)",
-            "Uses dimensions clause with hour(created) for grouping",
+            "Uses WHERE with metrics.duration > 5 (or 5000 for ms)",
+            "Uses GROUP BY with hour(created) for grouping",
             "Combines filtering and aggregation correctly",
         ],
-        "metadata": {"category": "btql_query", "difficulty": "hard"},
+        "metadata": {"category": "sql_query", "difficulty": "hard"},
     },
 ]
 
@@ -125,7 +125,7 @@ Eval(
     task=baseline_task,
     scores=[criteria_scorer],
     metadata={
-        "description": "Tests agent's ability to write correct BTQL queries and log operations",
+        "description": "Tests agent's ability to write correct SQL queries and log operations",
         "skill": "using-braintrust",
         "category": "log_querying",
     },
