@@ -14,6 +14,8 @@ Braintrust is a platform for evaluating, logging, and monitoring LLM application
 
 Use the `query_logs.py` script to run BTQL (Braintrust Query Language) queries.
 
+**Always share the BTQL query you used** when reporting results, so the user understands what was executed.
+
 **Script location:** `scripts/query_logs.py` (relative to this file)
 
 **Run from the user's project directory** (where `.env` with `BRAINTRUST_API_KEY` exists):
