@@ -1,9 +1,19 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "braintrust-skill",
+  "version": "1.0.0",
+  "description": "Braintrust skill for LLM evaluation, logging, and observability",
+  "owner": {
+    "name": "Braintrust",
+    "email": "support@braintrust.dev"
+  },
   "plugins": [
     {
       "name": "braintrust",
       "description": "Enables AI agents to use Braintrust for LLM evaluation, logging, and observability. Provides correct API usage, working examples, and helper scripts.",
-      "path": "."
+      "version": "1.0.0",
+      "source": ".",
+      "category": "development"
     }
   ]
 }
