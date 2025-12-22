@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "braintrust-claude-plugin",
   "version": "1.2.0",
-  "description": "Braintrust plugins for LLM evaluation, logging, observability, and Claude Code tracing",
+  "description": "Braintrust plugins for LLM evaluation, logging, and observability",
   "owner": {
     "name": "Braintrust",
     "email": "support@braintrust.dev"
