@@ -74,12 +74,28 @@ TOTAL_LINES=$(wc -l < "$CONV_FILE" | tr -d ' ')
 LLM_CALLS_CREATED=0
 CURRENT_INPUT=""
 CURRENT_INPUT_TYPE=""  # "user" or "tool_result"
+CURRENT_TOOL_USE_ID=""
 CURRENT_OUTPUT=""
 CURRENT_MODEL=""
 CURRENT_PROMPT_TOKENS=0
 CURRENT_COMPLETION_TOKENS=0
-CURRENT_TIMESTAMP=""
+CURRENT_START_TIMESTAMP=""  # ISO timestamp when this LLM call started
+CURRENT_END_TIMESTAMP=""    # ISO timestamp when this LLM call ended
 LINE_NUM=0
+
+# Convert ISO timestamp (UTC with Z suffix) to Unix epoch
+iso_to_epoch() {
+    local ts="$1"
+    [ -z "$ts" ] && { date +%s; return; }
+    # Remove the Z and milliseconds, parse as UTC
+    local clean_ts="${ts%.*}"  # Remove .xxxZ
+    clean_ts="${clean_ts}+0000"  # Append UTC offset
+    # macOS: use -j -f with explicit UTC offset
+    date -j -f "%Y-%m-%dT%H:%M:%S%z" "$clean_ts" "+%s" 2>/dev/null || \
+    # Linux: -d handles ISO format natively
+    date -d "$ts" "+%s" 2>/dev/null || \
+    date +%s
+}
 
 create_llm_span() {
     local input_content="$1"
@@ -87,20 +103,25 @@ create_llm_span() {
     local model="$3"
     local prompt_tokens="$4"
     local completion_tokens="$5"
-    local timestamp="$6"
+    local start_ts="$6"   # ISO timestamp
     local input_type="$7"
+    local tool_use_id="$8"
+    local end_ts="$9"     # ISO timestamp
 
     [ -z "$output_content" ] && return
 
     local span_id=$(generate_uuid)
     local total_tokens=$((prompt_tokens + completion_tokens))
-    local end_time=$(date +%s)
-    local start_time=${TURN_START:-$end_time}
+    local start_time=$(iso_to_epoch "$start_ts")
+    local end_time=$(iso_to_epoch "$end_ts")
 
-    # Format input based on type
+    # Format input as simple messages array
     local input_json
     if [ "$input_type" = "tool_result" ]; then
-        input_json=$(jq -n --arg content "$input_content" '[{"role": "user", "content": [{"type": "tool_result", "content": $content}]}]')
+        # Tool result - include tool_call_id and truncate long outputs
+        local truncated_content="${input_content:0:500}"
+        [ ${#input_content} -gt 500 ] && truncated_content="${truncated_content}..."
+        input_json=$(jq -n --arg content "$truncated_content" --arg tool_call_id "$tool_use_id" '[{"role": "tool", "tool_call_id": $tool_call_id, "content": $content}]')
     else
         input_json=$(jq -n --arg content "$input_content" '[{"role": "user", "content": $content}]')
     fi
@@ -168,36 +189,40 @@ while IFS= read -r line; do
         if [ "$IS_TOOL_RESULT" = "true" ]; then
             # Tool result - if we have pending output, save it first
             if [ -n "$CURRENT_OUTPUT" ]; then
-                create_llm_span "$CURRENT_INPUT" "$CURRENT_OUTPUT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_TIMESTAMP" "$CURRENT_INPUT_TYPE"
+                create_llm_span "$CURRENT_INPUT" "$CURRENT_OUTPUT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_INPUT_TYPE" "$CURRENT_TOOL_USE_ID" "$CURRENT_END_TIMESTAMP"
             fi
 
-            # Extract tool result content for next LLM call's input
+            # Extract tool result content and tool_use_id for next LLM call's input
             TOOL_RESULT_CONTENT=$(echo "$CONTENT" | jq -r '.[0].content // "tool result"' 2>/dev/null)
+            CURRENT_TOOL_USE_ID=$(echo "$CONTENT" | jq -r '.[0].tool_use_id // ""' 2>/dev/null)
             CURRENT_INPUT="$TOOL_RESULT_CONTENT"
             CURRENT_INPUT_TYPE="tool_result"
             CURRENT_OUTPUT=""
             CURRENT_MODEL=""
             CURRENT_PROMPT_TOKENS=0
             CURRENT_COMPLETION_TOKENS=0
-            CURRENT_TIMESTAMP="$MSG_TIMESTAMP"
+            CURRENT_START_TIMESTAMP="$MSG_TIMESTAMP"
+            CURRENT_END_TIMESTAMP=""
         else
             # Real user message - if we have pending output, save it
             if [ -n "$CURRENT_OUTPUT" ]; then
-                create_llm_span "$CURRENT_INPUT" "$CURRENT_OUTPUT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_TIMESTAMP" "$CURRENT_INPUT_TYPE"
+                create_llm_span "$CURRENT_INPUT" "$CURRENT_OUTPUT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_INPUT_TYPE" "$CURRENT_TOOL_USE_ID" "$CURRENT_END_TIMESTAMP"
             fi
 
             # Start tracking new LLM call
             CURRENT_INPUT="$CONTENT"
             CURRENT_INPUT_TYPE="user"
+            CURRENT_TOOL_USE_ID=""
             CURRENT_OUTPUT=""
             CURRENT_MODEL=""
             CURRENT_PROMPT_TOKENS=0
             CURRENT_COMPLETION_TOKENS=0
-            CURRENT_TIMESTAMP="$MSG_TIMESTAMP"
+            CURRENT_START_TIMESTAMP="$MSG_TIMESTAMP"
+            CURRENT_END_TIMESTAMP=""
         fi
 
     elif [ "$MSG_TYPE" = "assistant" ]; then
-        # Extract text content (skip tool_use blocks)
+        # Extract text content
         TEXT=$(echo "$line" | jq -r '
             .message.content
             | if type == "array" then
@@ -209,12 +234,28 @@ while IFS= read -r line; do
               end
         ' 2>/dev/null)
 
+        # Also check for tool_use (indicates an LLM call even without text)
+        TOOL_USE=$(echo "$line" | jq -r '
+            .message.content
+            | if type == "array" then
+                [.[] | select(.type == "tool_use") | .name] | join(", ")
+              else
+                empty
+              end
+        ' 2>/dev/null)
+
         if [ -n "$TEXT" ]; then
             if [ -n "$CURRENT_OUTPUT" ]; then
                 CURRENT_OUTPUT="$CURRENT_OUTPUT"$'\n'"$TEXT"
             else
                 CURRENT_OUTPUT="$TEXT"
             fi
+            # Update end timestamp to this message's timestamp
+            CURRENT_END_TIMESTAMP="$MSG_TIMESTAMP"
+        elif [ -n "$TOOL_USE" ] && [ -z "$CURRENT_OUTPUT" ]; then
+            # LLM call that only has tool_use, no text - still record it
+            CURRENT_OUTPUT="[Tool calls: $TOOL_USE]"
+            CURRENT_END_TIMESTAMP="$MSG_TIMESTAMP"
         fi
 
         # Extract model
@@ -234,14 +275,30 @@ done < "$CONV_FILE"
 
 # Save final LLM call
 if [ -n "$CURRENT_OUTPUT" ]; then
-    create_llm_span "$CURRENT_INPUT" "$CURRENT_OUTPUT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_TIMESTAMP" "$CURRENT_INPUT_TYPE"
+    create_llm_span "$CURRENT_INPUT" "$CURRENT_OUTPUT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_INPUT_TYPE" "$CURRENT_TOOL_USE_ID" "$CURRENT_END_TIMESTAMP"
 fi
+
+# Update Turn span with end time using merge write
+END_TIME=$(date +%s)
+
+TURN_UPDATE=$(jq -n \
+    --arg id "$TURN_SPAN_ID" \
+    --argjson end_time "$END_TIME" \
+    '{
+        id: $id,
+        _is_merge: true,
+        metrics: {
+            end: $end_time
+        }
+    }')
+
+insert_span "$PROJECT_ID" "$TURN_UPDATE" >/dev/null || true
 
 # Update state
 set_session_state "$SESSION_ID" "turn_last_line" "$TOTAL_LINES"
 set_session_state "$SESSION_ID" "current_turn_span_id" ""
 
 [ "$LLM_CALLS_CREATED" -gt 0 ] && log "INFO" "Created $LLM_CALLS_CREATED LLM spans for turn"
-log "INFO" "Turn finalized"
+log "INFO" "Turn finalized (end=$END_TIME)"
 
 exit 0
