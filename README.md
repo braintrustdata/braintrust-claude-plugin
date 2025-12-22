@@ -1,28 +1,40 @@
-# Braintrust Claude plugin
+# Braintrust Claude plugins
 
-A Claude Code plugin that enables AI agents to use Braintrust for LLM evaluation, logging, and observability.
+Claude Code plugins for Braintrust - LLM evaluation, logging, observability, and tracing.
 
-## Installation
+## Plugins
+
+### 1. Braintrust (evaluation & logging)
+
+Enables AI agents to use Braintrust for LLM evaluation, logging, and observability.
 
 ```bash
 claude plugin marketplace add braintrustdata/braintrust-claude-plugin
 claude plugin install braintrust@braintrust-claude-plugin
 ```
 
-Or via the interactive UI:
+### 2. Trace Claude Code (observability)
+
+Automatically trace Claude Code conversations to Braintrust.
+
+```bash
+claude plugin install trace-claude-code@braintrust-claude-plugin
 ```
-/plugin marketplace add braintrustdata/braintrust-claude-plugin
-/plugin install braintrust@braintrust-claude-plugin
-```
+
+See [trace-claude-code/SKILL.md](skills/trace-claude-code/SKILL.md) for setup instructions.
 
 ## Agent skills
 
-This repo also includes a [Braintrust skill](skills/using-braintrust/SKILL.md) built on the open [Agent Skills](https://agentskills.io/home) format, compatible with Claude Code, Cursor, Amp, and other agents.
+This repo includes skills built on the open [Agent Skills](https://agentskills.io/home) format, compatible with Claude Code, Cursor, Amp, and other agents.
 
-**One-liner:**
+**Install all skills:**
 ```bash
 curl -sL https://github.com/braintrustdata/braintrust-claude-plugin/archive/main.tar.gz | tar -xz -C ~/.claude/skills --strip-components=2 braintrust-claude-plugin-main/skills
 ```
+
+Available skills:
+- [using-braintrust](skills/using-braintrust/SKILL.md) - Evaluation, logging, and SQL queries
+- [trace-claude-code](skills/trace-claude-code/SKILL.md) - Automatic conversation tracing
 
 ## Setup
 
@@ -94,12 +106,16 @@ braintrust-claude-plugin/
 │   ├── plugin.json         # Plugin manifest
 │   └── marketplace.json    # Marketplace index
 ├── skills/
-│   └── using-braintrust/
-│       ├── SKILL.md        # Main skill documentation
-│       └── scripts/        # Helper scripts
-│           ├── query_logs.py
-│           ├── log_data.py
-│           └── run_eval.py
+│   ├── using-braintrust/
+│   │   ├── SKILL.md        # Evaluation & logging skill
+│   │   └── scripts/        # Helper scripts
+│   │       ├── query_logs.py
+│   │       ├── log_data.py
+│   │       └── run_eval.py
+│   └── trace-claude-code/
+│       ├── SKILL.md        # Claude Code tracing skill
+│       └── hooks/
+│           └── stop_hook.sh  # Hook script
 ├── evals/                  # Evaluation suite
 │   ├── eval_e2e_*.py       # End-to-end tests
 │   └── eval_*.py           # Baseline tests
