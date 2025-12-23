@@ -9,7 +9,8 @@ export STATE_FILE="$HOME/.claude/state/braintrust_state.json"
 export DEBUG="${BRAINTRUST_CC_DEBUG:-false}"
 export API_KEY="${BRAINTRUST_API_KEY}"
 export PROJECT="${BRAINTRUST_CC_PROJECT:-claude-code}"
-export API_URL="${BRAINTRUST_API_URL:-https://api.braintrust.dev}"
+export API_URL_CONTROLPLANE="${BRAINTRUST_APP_URL:-https://api.braintrust.dev}"
+export API_URL_DATAPLANE="${BRAINTRUST_API_URL:-https://api.braintrust.dev}"
 
 # Ensure directories exist
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -50,7 +51,7 @@ get_project_id() {
 
     # Try to get existing project
     local resp
-    resp=$(curl -sf -H "Authorization: Bearer $API_KEY" "$API_URL/v1/project?project_name=$encoded_name" 2>/dev/null) || true
+    resp=$(curl -sf -H "Authorization: Bearer $API_KEY" "$API_URL_CONTROLPLANE/v1/project?project_name=$encoded_name" 2>/dev/null) || true
     local pid
     pid=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
 
@@ -63,7 +64,7 @@ get_project_id() {
     # Create project
     debug "Creating project: $name"
     resp=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-        -d "{\"name\": \"$name\"}" "$API_URL/v1/project" 2>/dev/null) || true
+        -d "{\"name\": \"$name\"}" "$API_URL_CONTROLPLANE/v1/project" 2>/dev/null) || true
     pid=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
 
     if [ -n "$pid" ]; then
@@ -94,7 +95,7 @@ insert_span() {
         -H "Authorization: Bearer $API_KEY" \
         -H "Content-Type: application/json" \
         -d "{\"events\": [$event_json]}" \
-        "$API_URL/v1/project_logs/$project_id/insert" 2>&1)
+        "$API_URL_DATAPLANE/v1/project_logs/$project_id/insert" 2>&1)
 
     # Extract HTTP code from last line
     http_code=$(echo "$resp" | tail -1)
