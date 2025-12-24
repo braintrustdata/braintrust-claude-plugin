@@ -122,6 +122,14 @@ Create a `.env` file in your project directory:
 BRAINTRUST_API_KEY=your-api-key-here
 ```
 
+### Custom data planes
+
+If your organization uses a dedicated Braintrust data plane, also set:
+
+```
+BRAINTRUST_APP_URL=https://your-dataplane.example.com
+```
+
 ## Writing evaluation code (SDK)
 
 For custom evaluation logic, use the SDK directly.

@@ -60,6 +60,11 @@ def main():
     import braintrust
     from autoevals import Factuality, Score
 
+    # Support custom data planes via BRAINTRUST_APP_URL
+    app_url = os.environ.get("BRAINTRUST_APP_URL")
+    if app_url:
+        braintrust.login(app_url=app_url)
+
     def exact_match_scorer(input, output, expected=None, **kwargs):
         """Scorer that checks for exact match with expected."""
         if expected is None:

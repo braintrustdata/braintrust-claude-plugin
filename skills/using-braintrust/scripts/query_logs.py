@@ -40,11 +40,17 @@ def load_api_key() -> str:
     return api_key
 
 
+def get_api_base_url() -> str:
+    """Get API base URL, using BRAINTRUST_APP_URL if set for custom data planes."""
+    return os.environ.get("BRAINTRUST_APP_URL", "https://api.braintrust.dev")
+
+
 def get_project_id(project_name: str, api_key: str) -> str:
     """Get project ID from name."""
     headers = {"Authorization": f"Bearer {api_key}"}
+    base_url = get_api_base_url()
     resp = requests.get(
-        "https://api.braintrust.dev/v1/project",
+        f"{base_url}/v1/project",
         headers=headers,
         params={"project_name": project_name},
     )
@@ -54,7 +60,7 @@ def get_project_id(project_name: str, api_key: str) -> str:
             return projects[0]["id"]
 
     # Try listing all projects and matching by name
-    resp = requests.get("https://api.braintrust.dev/v1/project", headers=headers)
+    resp = requests.get(f"{base_url}/v1/project", headers=headers)
     if resp.status_code == 200:
         projects = resp.json().get("objects", [])
         for p in projects:
@@ -72,6 +78,7 @@ def get_project_id(project_name: str, api_key: str) -> str:
 def run_sql(project_id: str, query: str, api_key: str) -> list[dict]:
     """Execute SQL query against Braintrust logs."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    base_url = get_api_base_url()
 
     # Replace "FROM logs" with the project-scoped source
     full_query = re.sub(
@@ -79,7 +86,7 @@ def run_sql(project_id: str, query: str, api_key: str) -> list[dict]:
     )
 
     resp = requests.post(
-        "https://api.braintrust.dev/btql",
+        f"{base_url}/btql",
         headers=headers,
         json={"query": full_query, "fmt": "json"},
     )

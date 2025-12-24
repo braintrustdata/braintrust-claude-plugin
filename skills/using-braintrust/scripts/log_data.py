@@ -53,6 +53,11 @@ def main():
     # Import after loading env so braintrust picks up the key
     import braintrust
 
+    # Support custom data planes via BRAINTRUST_APP_URL
+    app_url = os.environ.get("BRAINTRUST_APP_URL")
+    if app_url:
+        braintrust.login(app_url=app_url)
+
     logger = braintrust.init_logger(project=args.project)
 
     # Batch logging
