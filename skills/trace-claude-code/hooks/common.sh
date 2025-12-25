@@ -6,6 +6,7 @@
 # Config
 export LOG_FILE="$HOME/.claude/state/braintrust_hook.log"
 export STATE_FILE="$HOME/.claude/state/braintrust_state.json"
+export SESSION_CONTEXT_FILE="${BRAINTRUST_SESSION_CONTEXT_FILE:-/tmp/braintrust_session.json}"
 export DEBUG="${BRAINTRUST_CC_DEBUG:-false}"
 export API_KEY="${BRAINTRUST_API_KEY}"
 export PROJECT="${BRAINTRUST_CC_PROJECT:-claude-code}"
@@ -178,4 +179,77 @@ get_username() {
 
 get_os() {
     uname -s 2>/dev/null || echo "unknown"
+}
+
+# Parse span IDs from Braintrust SDK exported format (SpanComponentsV3)
+# Format: version(1) + object_type(1) + num_uuids(1) + [field_id(1) + uuid(16)]... + JSON
+# Field IDs: 1=OBJECT_ID, 2=ROW_ID, 3=SPAN_ID, 4=ROOT_SPAN_ID
+# Output: span_id and root_span_id separated by space
+parse_exported_span() {
+    local exported="$1"
+    [ -z "$exported" ] && return 1
+
+    local result
+    result=$(python3 -c "
+import base64
+import sys
+from uuid import UUID
+
+try:
+    data = base64.b64decode('$exported')
+    if len(data) < 3:
+        sys.exit(1)
+
+    num_uuids = data[2]
+    uuids = {}
+    offset = 3
+
+    for _ in range(num_uuids):
+        if offset + 17 > len(data):
+            break
+        field_id = data[offset]
+        uuid_bytes = data[offset + 1:offset + 17]
+        uuid_str = str(UUID(bytes=uuid_bytes))
+        uuids[field_id] = uuid_str
+        offset += 17
+
+    span_id = uuids.get(3, '')      # SPAN_ID
+    root_span_id = uuids.get(4, '') # ROOT_SPAN_ID
+
+    if span_id and root_span_id:
+        print(f'{span_id} {root_span_id}')
+    else:
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null)
+
+    [ -z "$result" ] && return 1
+    echo "$result"
+}
+
+# Read session context from file for distributed tracing
+# Sets: PARENT_SPAN_ID (for span_parents), TRACE_ROOT_ID (for root_span_id), CONTEXT_PROJECT
+get_session_context() {
+    PARENT_SPAN_ID=""
+    TRACE_ROOT_ID=""
+    CONTEXT_PROJECT=""
+
+    if [ -f "$SESSION_CONTEXT_FILE" ]; then
+        local exported project
+        exported=$(jq -r '.parent_span // empty' "$SESSION_CONTEXT_FILE" 2>/dev/null)
+        project=$(jq -r '.project // empty' "$SESSION_CONTEXT_FILE" 2>/dev/null)
+
+        if [ -n "$exported" ]; then
+            local parsed
+            parsed=$(parse_exported_span "$exported")
+            if [ -n "$parsed" ]; then
+                PARENT_SPAN_ID=$(echo "$parsed" | cut -d' ' -f1)
+                TRACE_ROOT_ID=$(echo "$parsed" | cut -d' ' -f2)
+                debug "Parsed session context: parent=$PARENT_SPAN_ID root=$TRACE_ROOT_ID"
+            fi
+        fi
+
+        [ -n "$project" ] && CONTEXT_PROJECT="$project"
+    fi
 }

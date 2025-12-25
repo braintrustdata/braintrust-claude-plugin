@@ -123,6 +123,7 @@ Replace `/path/to/hooks/` with the actual path to this skill's hooks directory.
 | `BRAINTRUST_API_KEY` | Yes | Your Braintrust API key |
 | `BRAINTRUST_CC_PROJECT` | No | Project name (default: `claude-code`) |
 | `BRAINTRUST_CC_DEBUG` | No | Set to `"true"` for verbose logging |
+| `BRAINTRUST_SESSION_CONTEXT_FILE` | No | Path to session context file for distributed tracing (default: `/tmp/braintrust_session.json`) |
 
 ## Viewing traces
 
@@ -227,6 +228,74 @@ hooks/
 ├── stop_hook.sh       # Captures conversation turns
 └── session_end.sh     # Finalizes trace
 ```
+
+## Distributed tracing
+
+When Claude Code runs as part of a larger system (agent orchestrators, Slack bots, CI/CD pipelines), you can nest Claude Code traces under a parent span for end-to-end visibility.
+
+### How it works
+
+Before starting Claude Code, write a session context file containing the parent span information:
+
+```json
+{
+  "parent_span": "<braintrust_exported_span_string>",
+  "project": "optional-project-override"
+}
+```
+
+The hooks automatically detect this file and nest the Claude Code session under the specified parent span.
+
+### Example: Python orchestrator
+
+```python
+import json
+import subprocess
+import braintrust
+
+logger = braintrust.init_logger(project="my-orchestrator")
+
+with logger.start_span(name="orchestrator_task") as span:
+    # Write context for Claude Code
+    with open("/tmp/braintrust_session.json", "w") as f:
+        json.dump({"parent_span": span.export()}, f)
+
+    # Start Claude Code - it will automatically nest under this span
+    subprocess.run(["claude", "--prompt", "Implement the feature"])
+
+    # Optional: clean up
+    os.remove("/tmp/braintrust_session.json")
+```
+
+### Result in Braintrust UI
+
+```
+[Orchestrator Task]
+└── [Claude Code: my-project]
+    ├── Turn 1
+    │   ├── claude-sonnet-4-... (llm)
+    │   ├── Read: src/app.ts (tool)
+    │   └── claude-sonnet-4-... (llm)
+    └── Turn 2
+        └── ...
+```
+
+### Session context schema
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `parent_span` | Yes | Braintrust SDK exported span string (from `span.export()`) |
+| `project` | No | Override project name |
+
+### Custom file location
+
+Set `BRAINTRUST_SESSION_CONTEXT_FILE` to use a custom path:
+
+```bash
+export BRAINTRUST_SESSION_CONTEXT_FILE=/tmp/session_${SESSION_ID}.json
+```
+
+This is useful in multi-tenant environments where multiple Claude Code sessions run concurrently.
 
 ## Alternative: SDK integration
 
