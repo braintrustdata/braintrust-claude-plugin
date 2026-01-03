@@ -13,12 +13,7 @@ import braintrust
 
 def _ensure_logged_in():
     """Ensure we're logged in to Braintrust."""
-    try:
-        # Try to get the API connection - will raise if not logged in
-        braintrust.api_conn()
-    except RuntimeError:
-        # Not logged in yet, do it now
-        braintrust.login()
+    braintrust.login()  # No-op if already logged in
 
 
 def get_or_create_project(project_name: str) -> str | None:
@@ -27,22 +22,8 @@ def get_or_create_project(project_name: str) -> str | None:
     if not api_key:
         return None
 
-    _ensure_logged_in()
-    conn = braintrust.api_conn()
-
-    # Check if project exists
-    resp = conn.get("v1/project", params={"project_name": project_name})
-    if resp.status_code == 200:
-        projects = resp.json().get("objects", [])
-        if projects:
-            return projects[0]["id"]
-
-    # Create project if it doesn't exist
-    resp = conn.post("v1/project", json={"name": project_name})
-    if resp.status_code in (200, 201):
-        return resp.json().get("id")
-
-    return None
+    logger = braintrust.init_logger(project=project_name)
+    return logger.project.id
 
 
 def get_experiments(project_id: str) -> list[dict]:

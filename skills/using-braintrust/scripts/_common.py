@@ -46,7 +46,8 @@ def init_braintrust():
 
 
 def get_api_conn():
-    """Get the Braintrust API connection (must call init_braintrust first)."""
+    """Get the Braintrust API connection."""
     import braintrust
 
+    braintrust.login()  # No-op if already logged in
     return braintrust.api_conn()

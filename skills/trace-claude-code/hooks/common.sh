@@ -37,7 +37,16 @@ resolve_api_url() {
     resp=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" "$APP_URL/api/apikey/login" 2>/dev/null) || true
 
     local api_url
-    api_url=$(echo "$resp" | jq -r '.org_info[0].api_url // empty' 2>/dev/null)
+    local org_name="${BRAINTRUST_ORG_NAME:-}"
+
+    if [ -n "$org_name" ]; then
+        # Filter by org name if specified
+        api_url=$(echo "$resp" | jq -r --arg name "$org_name" \
+            '.org_info[] | select(.name == $name) | .api_url // empty' 2>/dev/null | head -1)
+    else
+        # Use first org
+        api_url=$(echo "$resp" | jq -r '.org_info[0].api_url // empty' 2>/dev/null)
+    fi
 
     if [ -n "$api_url" ]; then
         set_state_value "api_url" "$api_url"
