@@ -10,6 +10,14 @@ version: 1.0.0
 
 Braintrust is a platform for evaluating, logging, and monitoring LLM applications.
 
+## Listing projects
+
+Use `scripts/list_projects.py` to see all available projects:
+
+```bash
+uv run /path/to/scripts/list_projects.py
+```
+
 ## Querying logs with SQL
 
 Use the `query_logs.py` script to run SQL queries against Braintrust logs.

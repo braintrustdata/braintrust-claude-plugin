@@ -17,27 +17,15 @@ Environment variables:
 
 import argparse
 import json
-import os
 import re
 import sys
-from pathlib import Path
 
-import braintrust
-from dotenv import load_dotenv
-
-
-def load_env():
-    """Load environment from .env file."""
-    for path in [Path.cwd(), *Path.cwd().parents]:
-        env_file = path / ".env"
-        if env_file.exists():
-            load_dotenv(env_file)
-            break
+from _common import get_api_conn, init_braintrust
 
 
 def get_project_id(project_name: str) -> str:
     """Get project ID from name using the SDK's API connection."""
-    conn = braintrust.api_conn()
+    conn = get_api_conn()
 
     # Try to get by name
     resp = conn.get("v1/project", params={"project_name": project_name})
@@ -64,7 +52,7 @@ def get_project_id(project_name: str) -> str:
 
 def run_sql(project_id: str, query: str) -> list[dict]:
     """Execute SQL query against Braintrust logs using the SDK's API connection."""
-    conn = braintrust.api_conn()
+    conn = get_api_conn()
 
     # Replace "FROM logs" with the project-scoped source
     full_query = re.sub(
@@ -91,18 +79,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load environment variables
-    load_env()
-
-    if not os.environ.get("BRAINTRUST_API_KEY"):
-        print("Error: BRAINTRUST_API_KEY not found.", file=sys.stderr)
-        print("Set it via environment variable or create a .env file with:", file=sys.stderr)
-        print('  BRAINTRUST_API_KEY="your-api-key"', file=sys.stderr)
-        sys.exit(1)
-
-    # Login to Braintrust - this handles API URL discovery automatically
-    # Uses BRAINTRUST_APP_URL env var if set, otherwise defaults to braintrust.dev
-    braintrust.login()
+    init_braintrust()
 
     project_id = get_project_id(args.project)
 

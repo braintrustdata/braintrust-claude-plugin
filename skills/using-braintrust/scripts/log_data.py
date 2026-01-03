@@ -9,31 +9,18 @@ Log data to a Braintrust project.
 Usage:
     uv run log_data.py --project "My Project" --input "hello" --output "world"
     uv run log_data.py --project "My Project" --data '[{"input": "a", "output": "b"}]'
+
+Environment variables:
+    BRAINTRUST_API_KEY: Your Braintrust API key (required)
+    BRAINTRUST_APP_URL: Braintrust app URL (default: https://www.braintrust.dev)
 """
 
 import argparse
 import json
-import os
 import sys
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-
-def load_api_key() -> None:
-    """Load API key from environment or .env file."""
-    # Try loading .env from current directory and parent directories
-    for path in [Path.cwd(), *Path.cwd().parents]:
-        env_file = path / ".env"
-        if env_file.exists():
-            load_dotenv(env_file)
-            break
-
-    if not os.environ.get("BRAINTRUST_API_KEY"):
-        print("Error: BRAINTRUST_API_KEY not found.", file=sys.stderr)
-        print("Set it via environment variable or create a .env file with:", file=sys.stderr)
-        print('  BRAINTRUST_API_KEY="your-api-key"', file=sys.stderr)
-        sys.exit(1)
+import braintrust
+from _common import load_env, require_api_key
 
 
 def main():
@@ -48,10 +35,8 @@ def main():
     parser.add_argument("--data-file", help="Path to JSON file with log entries")
     args = parser.parse_args()
 
-    load_api_key()
-
-    # Import after loading env so braintrust picks up the key
-    import braintrust
+    load_env()
+    require_api_key()
 
     logger = braintrust.init_logger(project=args.project)
 
