@@ -12,18 +12,16 @@ Run with: braintrust eval evals/eval_e2e_log_fetch.py
 """
 
 import asyncio
-import os
 import sys
 import uuid
 from pathlib import Path
-
-import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from autoevals import Score
 from braintrust import Eval, start_span
 from braintrust.wrappers.claude_agent_sdk import setup_claude_agent_sdk
+from braintrust_api import count_logs_with_test_id, get_or_create_project
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
 # Generate unique test identifier to avoid collisions
@@ -36,68 +34,6 @@ SKILL_CONTENT = SKILL_PATH.read_text() if SKILL_PATH.exists() else ""
 
 # Setup Claude Agent SDK patching (will trace within parent span context)
 setup_claude_agent_sdk()
-
-
-def get_or_create_project(project_name: str) -> str | None:
-    """Get or create a Braintrust project and return its ID."""
-    api_key = os.environ.get("BRAINTRUST_API_KEY")
-    if not api_key:
-        return None
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    # Check if project exists
-    resp = requests.get(
-        "https://api.braintrust.dev/v1/project",
-        headers=headers,
-        params={"project_name": project_name},
-    )
-    if resp.status_code == 200:
-        projects = resp.json().get("objects", [])
-        if projects:
-            return projects[0]["id"]
-
-    # Create project if it doesn't exist
-    resp = requests.post(
-        "https://api.braintrust.dev/v1/project",
-        headers={**headers, "Content-Type": "application/json"},
-        json={"name": project_name},
-    )
-    if resp.status_code in (200, 201):
-        return resp.json().get("id")
-
-    return None
-
-
-def query_project_logs(project_id: str, test_id: str | None = None) -> list[dict]:
-    """Query project logs from Braintrust using SQL."""
-    api_key = os.environ.get("BRAINTRUST_API_KEY")
-    if not api_key or not project_id:
-        return []
-
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    # Build SQL query - filter by test_id if provided
-    if test_id:
-        query = f"SELECT id, created, input, output, metadata, scores FROM project_logs('{project_id}') WHERE metadata.test_id = '{test_id}' LIMIT 100"
-    else:
-        query = f"SELECT id, created, input, output, metadata, scores FROM project_logs('{project_id}') LIMIT 100"
-
-    resp = requests.post(
-        "https://api.braintrust.dev/btql",
-        headers=headers,
-        json={"query": query, "fmt": "json"},
-    )
-
-    if resp.status_code == 200:
-        return resp.json().get("data", [])
-    return []
-
-
-def count_logs_with_test_id(project_id: str, test_id: str) -> int:
-    """Count logs with a specific test_id."""
-    logs = query_project_logs(project_id, test_id)
-    return len(logs)
 
 
 async def run_claude_agent(prompt: str, max_turns: int = 10, use_skill: bool = True) -> dict:

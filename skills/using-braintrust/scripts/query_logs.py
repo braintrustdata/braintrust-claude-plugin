@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["requests", "python-dotenv"]
+# dependencies = ["braintrust", "python-dotenv"]
 # ///
 """
 Execute a SQL query against Braintrust project logs.
@@ -9,6 +9,10 @@ Execute a SQL query against Braintrust project logs.
 Usage:
     uv run query_logs.py --project "My Project" --query "SELECT input, output FROM logs LIMIT 10"
     uv run query_logs.py --project "My Project" --query "SELECT count(*) as count FROM logs WHERE created > now() - interval '1 day'"
+
+Environment variables:
+    BRAINTRUST_API_KEY: Your Braintrust API key (required)
+    BRAINTRUST_APP_URL: Braintrust app URL (default: https://www.braintrust.dev)
 """
 
 import argparse
@@ -18,43 +22,32 @@ import re
 import sys
 from pathlib import Path
 
-import requests
+import braintrust
 from dotenv import load_dotenv
 
 
-def load_api_key() -> str:
-    """Load API key from environment or .env file."""
+def load_env():
+    """Load environment from .env file."""
     for path in [Path.cwd(), *Path.cwd().parents]:
         env_file = path / ".env"
         if env_file.exists():
             load_dotenv(env_file)
             break
 
-    api_key = os.environ.get("BRAINTRUST_API_KEY")
-    if not api_key:
-        print("Error: BRAINTRUST_API_KEY not found.", file=sys.stderr)
-        print("Set it via environment variable or create a .env file with:", file=sys.stderr)
-        print('  BRAINTRUST_API_KEY="your-api-key"', file=sys.stderr)
-        sys.exit(1)
-    assert api_key is not None
-    return api_key
 
+def get_project_id(project_name: str) -> str:
+    """Get project ID from name using the SDK's API connection."""
+    conn = braintrust.api_conn()
 
-def get_project_id(project_name: str, api_key: str) -> str:
-    """Get project ID from name."""
-    headers = {"Authorization": f"Bearer {api_key}"}
-    resp = requests.get(
-        "https://api.braintrust.dev/v1/project",
-        headers=headers,
-        params={"project_name": project_name},
-    )
+    # Try to get by name
+    resp = conn.get("v1/project", params={"project_name": project_name})
     if resp.status_code == 200:
         projects = resp.json().get("objects", [])
         if projects:
             return projects[0]["id"]
 
     # Try listing all projects and matching by name
-    resp = requests.get("https://api.braintrust.dev/v1/project", headers=headers)
+    resp = conn.get("v1/project")
     if resp.status_code == 200:
         projects = resp.json().get("objects", [])
         for p in projects:
@@ -69,20 +62,16 @@ def get_project_id(project_name: str, api_key: str) -> str:
     sys.exit(1)
 
 
-def run_sql(project_id: str, query: str, api_key: str) -> list[dict]:
-    """Execute SQL query against Braintrust logs."""
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+def run_sql(project_id: str, query: str) -> list[dict]:
+    """Execute SQL query against Braintrust logs using the SDK's API connection."""
+    conn = braintrust.api_conn()
 
     # Replace "FROM logs" with the project-scoped source
     full_query = re.sub(
         r"\bFROM\s+logs\b", f"FROM project_logs('{project_id}')", query, flags=re.IGNORECASE
     )
 
-    resp = requests.post(
-        "https://api.braintrust.dev/btql",
-        headers=headers,
-        json={"query": full_query, "fmt": "json"},
-    )
+    resp = conn.post("btql", json={"query": full_query, "fmt": "json"})
 
     if resp.status_code == 200:
         return resp.json().get("data", [])
@@ -102,8 +91,20 @@ def main():
     )
     args = parser.parse_args()
 
-    api_key = load_api_key()
-    project_id = get_project_id(args.project, api_key)
+    # Load environment variables
+    load_env()
+
+    if not os.environ.get("BRAINTRUST_API_KEY"):
+        print("Error: BRAINTRUST_API_KEY not found.", file=sys.stderr)
+        print("Set it via environment variable or create a .env file with:", file=sys.stderr)
+        print('  BRAINTRUST_API_KEY="your-api-key"', file=sys.stderr)
+        sys.exit(1)
+
+    # Login to Braintrust - this handles API URL discovery automatically
+    # Uses BRAINTRUST_APP_URL env var if set, otherwise defaults to braintrust.dev
+    braintrust.login()
+
+    project_id = get_project_id(args.project)
 
     # Show the SQL query being executed
     executed_query = re.sub(
@@ -111,7 +112,7 @@ def main():
     )
     print(f"Executing SQL: {executed_query}\n", file=sys.stderr)
 
-    results = run_sql(project_id, args.query, api_key)
+    results = run_sql(project_id, args.query)
 
     if args.format == "json":
         print(json.dumps(results, indent=2, default=str))

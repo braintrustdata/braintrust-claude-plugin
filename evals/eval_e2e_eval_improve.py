@@ -14,18 +14,16 @@ Run with: braintrust eval evals/eval_e2e_eval_improve.py
 """
 
 import asyncio
-import os
 import sys
 import uuid
 from pathlib import Path
-
-import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from autoevals import Score
 from braintrust import Eval, start_span
 from braintrust.wrappers.claude_agent_sdk import setup_claude_agent_sdk
+from braintrust_api import get_experiments, get_or_create_project
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
 # Generate unique test identifier
@@ -38,77 +36,6 @@ SKILL_CONTENT = SKILL_PATH.read_text() if SKILL_PATH.exists() else ""
 
 # Setup Claude Agent SDK patching
 setup_claude_agent_sdk()
-
-
-def get_or_create_project(project_name: str) -> str | None:
-    """Get or create a Braintrust project and return its ID."""
-    api_key = os.environ.get("BRAINTRUST_API_KEY")
-    if not api_key:
-        return None
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    resp = requests.get(
-        "https://api.braintrust.dev/v1/project",
-        headers=headers,
-        params={"project_name": project_name},
-    )
-    if resp.status_code == 200:
-        projects = resp.json().get("objects", [])
-        if projects:
-            return projects[0]["id"]
-
-    resp = requests.post(
-        "https://api.braintrust.dev/v1/project",
-        headers={**headers, "Content-Type": "application/json"},
-        json={"name": project_name},
-    )
-    if resp.status_code in (200, 201):
-        return resp.json().get("id")
-
-    return None
-
-
-def get_experiments(project_id: str) -> list[dict]:
-    """Get all experiments for a project."""
-    api_key = os.environ.get("BRAINTRUST_API_KEY")
-    if not api_key or not project_id:
-        return []
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    resp = requests.get(
-        "https://api.braintrust.dev/v1/experiment",
-        headers=headers,
-        params={"project_id": project_id, "limit": 100},
-    )
-
-    if resp.status_code == 200:
-        return resp.json().get("objects", [])
-    return []
-
-
-def get_experiment_summary(experiment_id: str) -> dict | None:
-    """Get summary stats for an experiment."""
-    api_key = os.environ.get("BRAINTRUST_API_KEY")
-    if not api_key:
-        return None
-
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    # Query experiment scores using BTQL
-    query = f'from: experiment("{experiment_id}") | dimensions: 1 | measures: avg(scores) as avg_scores, count(1) as count'
-    resp = requests.post(
-        "https://api.braintrust.dev/btql",
-        headers=headers,
-        json={"query": query, "fmt": "json"},
-    )
-
-    if resp.status_code == 200:
-        data = resp.json().get("data", [])
-        if data:
-            return data[0]
-    return None
 
 
 async def run_claude_agent(prompt: str, max_turns: int = 15, use_skill: bool = True) -> dict:
