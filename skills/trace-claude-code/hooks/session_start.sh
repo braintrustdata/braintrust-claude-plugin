@@ -38,7 +38,7 @@ if [ -n "$EXISTING_ROOT" ]; then
 fi
 
 # Create root span for the session
-ROOT_SPAN_ID="$SESSION_ID"
+SESSION_SPAN_ID="$SESSION_ID"
 TIMESTAMP=$(get_timestamp)
 
 # Extract workspace info if available
@@ -50,41 +50,88 @@ HOSTNAME=$(get_hostname)
 USERNAME=$(get_username)
 OS=$(get_os)
 
-EVENT=$(jq -n \
-    --arg id "$ROOT_SPAN_ID" \
-    --arg span_id "$ROOT_SPAN_ID" \
-    --arg root_span_id "$ROOT_SPAN_ID" \
-    --arg created "$TIMESTAMP" \
-    --arg session "$SESSION_ID" \
-    --arg workspace "$WORKSPACE_NAME" \
-    --arg cwd "$WORKSPACE" \
-    --arg hostname "$HOSTNAME" \
-    --arg username "$USERNAME" \
-    --arg os "$OS" \
-    '{
-        id: $id,
-        span_id: $span_id,
-        root_span_id: $root_span_id,
-        created: $created,
-        input: ("Session: " + $workspace),
-        metadata: {
-            session_id: $session,
-            workspace: $cwd,
-            hostname: $hostname,
-            username: $username,
-            os: $os,
-            source: "claude-code"
-        },
-        span_attributes: {
-            name: ("Claude Code: " + $workspace),
-            type: "task"
-        }
-    }')
+# Check for external parent span context (distributed tracing)
+get_session_context
+
+if [ -n "$PARENT_SPAN_ID" ] && [ -n "$TRACE_ROOT_ID" ]; then
+    # Nested mode: Claude Code session is child of external span
+    ROOT_SPAN_ID="$TRACE_ROOT_ID"
+    debug "Nesting under parent span: $PARENT_SPAN_ID (root: $TRACE_ROOT_ID)"
+
+    EVENT=$(jq -n \
+        --arg id "$SESSION_SPAN_ID" \
+        --arg span_id "$SESSION_SPAN_ID" \
+        --arg root_span_id "$ROOT_SPAN_ID" \
+        --arg parent_span_id "$PARENT_SPAN_ID" \
+        --arg created "$TIMESTAMP" \
+        --arg session "$SESSION_ID" \
+        --arg workspace "$WORKSPACE_NAME" \
+        --arg cwd "$WORKSPACE" \
+        --arg hostname "$HOSTNAME" \
+        --arg username "$USERNAME" \
+        --arg os "$OS" \
+        '{
+            id: $id,
+            span_id: $span_id,
+            root_span_id: $root_span_id,
+            span_parents: [$parent_span_id],
+            created: $created,
+            input: ("Session: " + $workspace),
+            metadata: {
+                session_id: $session,
+                workspace: $cwd,
+                hostname: $hostname,
+                username: $username,
+                os: $os,
+                source: "claude-code"
+            },
+            span_attributes: {
+                name: ("Claude Code: " + $workspace),
+                type: "task"
+            }
+        }')
+else
+    # Standalone mode: Claude Code session is its own root
+    ROOT_SPAN_ID="$SESSION_SPAN_ID"
+    debug "Creating standalone session (no parent context)"
+
+    EVENT=$(jq -n \
+        --arg id "$SESSION_SPAN_ID" \
+        --arg span_id "$SESSION_SPAN_ID" \
+        --arg root_span_id "$ROOT_SPAN_ID" \
+        --arg created "$TIMESTAMP" \
+        --arg session "$SESSION_ID" \
+        --arg workspace "$WORKSPACE_NAME" \
+        --arg cwd "$WORKSPACE" \
+        --arg hostname "$HOSTNAME" \
+        --arg username "$USERNAME" \
+        --arg os "$OS" \
+        '{
+            id: $id,
+            span_id: $span_id,
+            root_span_id: $root_span_id,
+            created: $created,
+            input: ("Session: " + $workspace),
+            metadata: {
+                session_id: $session,
+                workspace: $cwd,
+                hostname: $hostname,
+                username: $username,
+                os: $os,
+                source: "claude-code"
+            },
+            span_attributes: {
+                name: ("Claude Code: " + $workspace),
+                type: "task"
+            }
+        }')
+fi
 
 ROW_ID=$(insert_span "$PROJECT_ID" "$EVENT") || { log "ERROR" "Failed to create session root"; exit 0; }
 
 # Save session state
 set_session_state "$SESSION_ID" "root_span_id" "$ROOT_SPAN_ID"
+set_session_state "$SESSION_ID" "session_span_id" "$SESSION_SPAN_ID"
 set_session_state "$SESSION_ID" "project_id" "$PROJECT_ID"
 set_session_state "$SESSION_ID" "turn_count" "0"
 set_session_state "$SESSION_ID" "tool_count" "0"
