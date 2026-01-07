@@ -135,19 +135,24 @@ create_llm_span() {
     local start_time=$(iso_to_epoch "$start_ts")
     local end_time=$(iso_to_epoch "$end_ts")
 
-    # Input is the conversation history up to this point
-    local input_json="$input_history"
+    # Apply secret redaction to conversation history and output
+    local input_json
+    input_json=$(echo "$input_history" | redact_secrets)
+    local redacted_output_text
+    redacted_output_text=$(echo "$output_text" | redact_secrets)
+    local redacted_tool_calls
+    redacted_tool_calls=$(echo "$tool_calls_json" | redact_secrets)
 
     # Format output - include tool_calls if present
     local output_json
-    local has_tool_calls=$(echo "$tool_calls_json" | jq 'length > 0' 2>/dev/null)
+    local has_tool_calls=$(echo "$redacted_tool_calls" | jq 'length > 0' 2>/dev/null)
     if [ "$has_tool_calls" = "true" ]; then
         output_json=$(jq -n \
-            --arg content "${output_text:-}" \
-            --argjson tool_calls "$tool_calls_json" \
+            --arg content "${redacted_output_text:-}" \
+            --argjson tool_calls "$redacted_tool_calls" \
             '{role: "assistant", content: $content, tool_calls: $tool_calls}')
     else
-        output_json=$(jq -n --arg content "$output_text" '{role: "assistant", content: $content}')
+        output_json=$(jq -n --arg content "$redacted_output_text" '{role: "assistant", content: $content}')
     fi
 
     local event=$(jq -n \

@@ -31,12 +31,12 @@ Claude Code Session (root trace)
 
 Four hooks capture the complete workflow:
 
-| Hook | What it captures |
-|------|------------------|
-| **SessionStart** | Creates root trace when you start Claude Code |
-| **PostToolUse** | Captures every tool call (file reads, edits, terminal commands) |
-| **Stop** | Captures conversation turns (your message + Claude's response) |
-| **SessionEnd** | Logs session summary when you exit |
+| Hook             | What it captures                                                |
+| ---------------- | --------------------------------------------------------------- |
+| **SessionStart** | Creates root trace when you start Claude Code                   |
+| **PostToolUse**  | Captures every tool call (file reads, edits, terminal commands) |
+| **Stop**         | Captures conversation turns (your message + Claude's response)  |
+| **SessionEnd**   | Logs session summary when you exit                              |
 
 ## Quick setup
 
@@ -117,12 +117,52 @@ Replace `/path/to/hooks/` with the actual path to this skill's hooks directory.
 
 ### Environment variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TRACE_TO_BRAINTRUST` | Yes | Set to `"true"` to enable tracing |
-| `BRAINTRUST_API_KEY` | Yes | Your Braintrust API key |
-| `BRAINTRUST_CC_PROJECT` | No | Project name (default: `claude-code`) |
-| `BRAINTRUST_CC_DEBUG` | No | Set to `"true"` for verbose logging |
+| Variable                     | Required | Description                                                                     |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------- |
+| `TRACE_TO_BRAINTRUST`        | Yes      | Set to `"true"` to enable tracing                                               |
+| `BRAINTRUST_API_KEY`         | Yes      | Your Braintrust API key                                                         |
+| `BRAINTRUST_CC_PROJECT`      | No       | Project name (default: `claude-code`)                                           |
+| `BRAINTRUST_CC_DEBUG`        | No       | Set to `"true"` for verbose logging                                             |
+| `BRAINTRUST_REDACT_ENABLED`  | No       | Set to `"false"` to disable secret redaction (default: `"true"`)                |
+| `BRAINTRUST_REDACT_PATTERNS` | No       | Comma-separated list of additional regex patterns to redact                     |
+| `BRAINTRUST_SKIP_FILES`      | No       | Comma-separated list of file patterns to skip content for (e.g., `*.env,*.pem`) |
+
+### Secret redaction
+
+By default, the plugin redacts common secrets before sending data to Braintrust:
+
+**Automatically redacted patterns:**
+
+- API keys: `sk-*`, `ghp_*`, `gho_*`, `xoxb-*`, `xoxp-*`, `AKIA*`, `npm_*`, `pypi-*`
+- JWT tokens
+- Generic secrets: `password=`, `secret=`, `api_key=`, `token=`, `database_url=`
+
+**Files with redacted content:**
+
+- `.env`, `.env.*`, `.env.local`, `.env.production`
+- `*credentials*`, `*secrets*`
+- `*.pem`, `*.key`, `*.p12`, `id_rsa*`, `id_ed25519*`
+
+To add custom redaction patterns:
+
+```json
+{
+  "env": {
+    "BRAINTRUST_REDACT_PATTERNS": "my_api_key_.*,custom_secret_.*",
+    "BRAINTRUST_SKIP_FILES": "*.secret,config/keys/*"
+  }
+}
+```
+
+To disable redaction entirely (not recommended):
+
+```json
+{
+  "env": {
+    "BRAINTRUST_REDACT_ENABLED": "false"
+  }
+}
+```
 
 ## Viewing traces
 
@@ -133,6 +173,7 @@ After running Claude Code with tracing enabled:
 3. Click **Logs** to see all traced sessions
 
 Each trace shows:
+
 - **Session root**: The overall Claude Code session
 - **Turns**: Each conversation exchange (user input → assistant response)
 - **Tool calls**: Individual operations (file reads, edits, terminal commands)
@@ -142,11 +183,13 @@ Each trace shows:
 Traces are hierarchical:
 
 - **Session** (root span)
+
   - `span_attributes.type`: `"task"`
   - `metadata.session_id`: Unique session identifier
   - `metadata.workspace`: Project directory
 
 - **Turn** (child of session)
+
   - `span_attributes.type`: `"llm"`
   - `input`: User message
   - `output`: Assistant response
@@ -163,11 +206,13 @@ Traces are hierarchical:
 ### No traces appearing
 
 1. **Check hooks are running:**
+
    ```bash
    tail -f ~/.claude/state/braintrust_hook.log
    ```
 
 2. **Verify environment variables** in `.claude/settings.local.json`:
+
    - `TRACE_TO_BRAINTRUST` must be `"true"`
    - `BRAINTRUST_API_KEY` must be valid
 
@@ -191,6 +236,7 @@ chmod +x /path/to/hooks/*.sh
 ### Missing jq command
 
 Install jq:
+
 - **macOS**: `brew install jq`
 - **Ubuntu/Debian**: `sudo apt-get install jq`
 
