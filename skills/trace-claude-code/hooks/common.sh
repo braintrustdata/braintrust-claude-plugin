@@ -226,7 +226,147 @@ get_timestamp() {
     date -u +"%Y-%m-%dT%H:%M:%S.000Z"
 }
 
-# Get system info for metadata
+# Secret redaction configuration
+export REDACT_ENABLED="${BRAINTRUST_REDACT_ENABLED:-true}"
+export REDACT_PATTERNS="${BRAINTRUST_REDACT_PATTERNS:-}"
+export SKIP_FILES="${BRAINTRUST_SKIP_FILES:-}"
+
+# Default patterns to redact (common API keys and secrets)
+DEFAULT_REDACT_PATTERNS=(
+    'sk-[a-zA-Z0-9]{20,}'                    # OpenAI/Anthropic API keys
+    'sk-proj-[a-zA-Z0-9]{20,}'               # OpenAI project keys
+    'ghp_[a-zA-Z0-9]{36,}'                   # GitHub personal access tokens
+    'gho_[a-zA-Z0-9]{36,}'                   # GitHub OAuth tokens
+    'github_pat_[a-zA-Z0-9_]{22,}'           # GitHub fine-grained PATs
+    'xoxb-[a-zA-Z0-9-]+'                     # Slack bot tokens
+    'xoxp-[a-zA-Z0-9-]+'                     # Slack user tokens
+    'AKIA[A-Z0-9]{16}'                       # AWS access key IDs
+    'eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*'   # JWT tokens
+    'npm_[a-zA-Z0-9]{36}'                    # npm tokens
+    'pypi-[a-zA-Z0-9]{36,}'                  # PyPI tokens
+)
+
+# Default file patterns to skip content for
+DEFAULT_SKIP_FILE_PATTERNS=(
+    '*.env'
+    '*.env.*'
+    '.env.local'
+    '.env.production'
+    '.env.development'
+    '*credentials*'
+    '*secrets*'
+    '*.pem'
+    '*.key'
+    '*.p12'
+    '*.pfx'
+    'id_rsa*'
+    'id_ed25519*'
+    '*.asc'
+)
+
+# Check if redaction is enabled
+redaction_enabled() {
+    [ "$(echo "$REDACT_ENABLED" | tr '[:upper:]' '[:lower:]')" = "true" ]
+}
+
+# Check if a file path matches skip patterns
+should_skip_file_content() {
+    local file_path="$1"
+    [ -z "$file_path" ] && return 1
+    
+    local filename
+    filename=$(basename "$file_path")
+    
+    # Check user-defined patterns first
+    if [ -n "$SKIP_FILES" ]; then
+        IFS=',' read -ra USER_PATTERNS <<< "$SKIP_FILES"
+        for pattern in "${USER_PATTERNS[@]}"; do
+            pattern=$(echo "$pattern" | xargs)  # trim whitespace
+            case "$filename" in
+                $pattern) return 0 ;;
+            esac
+            case "$file_path" in
+                $pattern) return 0 ;;
+            esac
+        done
+    fi
+    
+    # Check default patterns
+    for pattern in "${DEFAULT_SKIP_FILE_PATTERNS[@]}"; do
+        case "$filename" in
+            $pattern) return 0 ;;
+        esac
+    done
+    
+    return 1
+}
+
+# Redact secrets from a string
+# Usage: echo "$content" | redact_secrets
+redact_secrets() {
+    local input
+    input=$(cat)
+    
+    # Skip if redaction disabled
+    if ! redaction_enabled; then
+        echo "$input"
+        return 0
+    fi
+    
+    local result="$input"
+    
+    # Apply default patterns
+    for pattern in "${DEFAULT_REDACT_PATTERNS[@]}"; do
+        result=$(echo "$result" | sed -E "s/$pattern/[REDACTED]/g" 2>/dev/null || echo "$result")
+    done
+    
+    # Apply generic key=value patterns for common secret names
+    result=$(echo "$result" | sed -E \
+        -e 's/(password["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(secret["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(api_key["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(apikey["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(token["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(private_key["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(access_token["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(refresh_token["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(client_secret["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        -e 's/(database_url["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}]+)/\1[REDACTED]/gi' \
+        2>/dev/null || echo "$result")
+    
+    # Apply user-defined patterns
+    if [ -n "$REDACT_PATTERNS" ]; then
+        IFS=',' read -ra USER_PATTERNS <<< "$REDACT_PATTERNS"
+        for pattern in "${USER_PATTERNS[@]}"; do
+            pattern=$(echo "$pattern" | xargs)  # trim whitespace
+            result=$(echo "$result" | sed -E "s/$pattern/[REDACTED]/g" 2>/dev/null || echo "$result")
+        done
+    fi
+    
+    echo "$result"
+}
+
+# Redact JSON content (handles nested structures)
+# Usage: redact_json "$json_string"
+redact_json() {
+    local json="$1"
+    
+    if ! redaction_enabled; then
+        echo "$json"
+        return 0
+    fi
+    
+    # Pass through redact_secrets for pattern matching
+    echo "$json" | redact_secrets
+}
+
+# Create a redacted placeholder for sensitive files
+get_redacted_file_placeholder() {
+    local file_path="$1"
+    jq -n --arg path "$file_path" \
+        '{"content": "[REDACTED - SENSITIVE FILE]", "file": $path, "redacted": true}'
+}
+
 get_hostname() {
     hostname 2>/dev/null || echo "unknown"
 }
@@ -238,3 +378,4 @@ get_username() {
 get_os() {
     uname -s 2>/dev/null || echo "unknown"
 }
+

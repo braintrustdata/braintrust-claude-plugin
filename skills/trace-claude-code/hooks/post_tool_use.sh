@@ -19,9 +19,21 @@ debug "PostToolUse input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)
 
 # Extract tool info
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
-TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null)
-TOOL_OUTPUT=$(echo "$INPUT" | jq -c '.tool_response // .output // {}' 2>/dev/null)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+
+# Extract file path for file-based tools (for redaction check)
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null)
+
+# Check if this is a sensitive file that should have content redacted
+if [ -n "$FILE_PATH" ] && should_skip_file_content "$FILE_PATH"; then
+    debug "Sensitive file detected, redacting content: $FILE_PATH"
+    TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input | del(.content) | . + {content: "[REDACTED - SENSITIVE FILE]"}' 2>/dev/null)
+    TOOL_OUTPUT=$(get_redacted_file_placeholder "$FILE_PATH")
+else
+    # Apply standard redaction to inputs and outputs
+    TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null | redact_secrets)
+    TOOL_OUTPUT=$(echo "$INPUT" | jq -c '.tool_response // .output // {}' 2>/dev/null | redact_secrets)
+fi
 
 # Skip if no tool name
 [ -z "$TOOL_NAME" ] && { debug "No tool name, skipping"; exit 0; }
