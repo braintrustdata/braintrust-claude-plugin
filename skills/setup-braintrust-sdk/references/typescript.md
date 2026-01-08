@@ -4,7 +4,9 @@
 
 Install the latest version (npm will pin it in package.json):
 
-1. Check latest version on npm: https://www.npmjs.com/package/braintrust
+1. Find the latest version:
+   - Fetch https://registry.npmjs.org/braintrust/latest and read `version`
+   - Or visit: https://www.npmjs.com/package/braintrust
 2. Install with: `npm install braintrust@X.Y.Z` or `yarn add braintrust@X.Y.Z`
 
 ## Documentation

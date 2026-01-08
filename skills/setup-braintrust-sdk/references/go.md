@@ -4,7 +4,9 @@
 
 Install the latest version:
 
-1. Check latest version: https://github.com/braintrustdata/braintrust-sdk-go/releases
+1. Find the latest version:
+   - Fetch https://api.github.com/repos/braintrustdata/braintrust-sdk-go/releases/latest and read `tag_name`
+   - Or visit: https://github.com/braintrustdata/braintrust-sdk-go/releases
 2. Install with: `go get github.com/braintrustdata/braintrust-sdk-go@vX.Y.Z`
 
 ## Documentation

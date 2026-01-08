@@ -4,7 +4,9 @@
 
 Install the latest version:
 
-1. Check latest version on Maven Central: https://central.sonatype.com/artifact/com.braintrust/braintrust-java
+1. Find the latest version:
+   - Fetch https://search.maven.org/solrsearch/select?q=g:com.braintrust+AND+a:braintrust-java&rows=1&wt=json and read `response.docs[0].latestVersion`
+   - Or visit: https://central.sonatype.com/artifact/com.braintrust/braintrust-java
 2. Add to pom.xml:
    ```xml
    <dependency>

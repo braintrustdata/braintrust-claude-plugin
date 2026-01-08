@@ -4,7 +4,9 @@
 
 Install the latest version and pin it:
 
-1. Check latest version on RubyGems: https://rubygems.org/gems/braintrust
+1. Find the latest version:
+   - Fetch https://rubygems.org/api/v1/versions/braintrust/latest.json and read `version`
+   - Or visit: https://rubygems.org/gems/braintrust
 2. Add to Gemfile: `gem 'braintrust', '~> X.Y'`
 3. Run `bundle install`
 

@@ -4,7 +4,9 @@
 
 Install the latest version and pin it:
 
-1. Check latest version on PyPI: https://pypi.org/project/braintrust/
+1. Find the latest version:
+   - Fetch https://pypi.org/pypi/braintrust/json and read `info.version`
+   - Or visit: https://pypi.org/project/braintrust/
 2. Add to dependency file with specific version:
    - `requirements.txt`: `braintrust==X.Y.Z`
    - `pyproject.toml`: `braintrust = "X.Y.Z"`
