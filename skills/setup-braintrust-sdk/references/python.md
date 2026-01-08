@@ -1,5 +1,15 @@
 # Python SDK
 
+## Installation
+
+Install the latest version and pin it:
+
+1. Check latest version on PyPI: https://pypi.org/project/braintrust/
+2. Add to dependency file with specific version:
+   - `requirements.txt`: `braintrust==X.Y.Z`
+   - `pyproject.toml`: `braintrust = "X.Y.Z"`
+   - `Pipfile`: `braintrust = "==X.Y.Z"`
+
 ## Documentation
 
 | Type | URL |

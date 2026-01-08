@@ -1,5 +1,12 @@
 # Go SDK
 
+## Installation
+
+Install the latest version:
+
+1. Check latest version: https://github.com/braintrustdata/braintrust-sdk-go/releases
+2. Install with: `go get github.com/braintrustdata/braintrust-sdk-go@vX.Y.Z`
+
 ## Documentation
 
 | Type | URL |

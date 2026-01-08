@@ -1,5 +1,13 @@
 # Ruby SDK
 
+## Installation
+
+Install the latest version and pin it:
+
+1. Check latest version on RubyGems: https://rubygems.org/gems/braintrust
+2. Add to Gemfile: `gem 'braintrust', '~> X.Y'`
+3. Run `bundle install`
+
 ## Documentation
 
 | Type | URL |
