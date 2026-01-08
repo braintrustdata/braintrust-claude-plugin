@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "WebFetch(domain:www.braintrust.dev)"
+      "WebFetch(domain:www.braintrust.dev)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

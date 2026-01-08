@@ -52,13 +52,22 @@ You must clarify these three things before making changes:
 Braintrust initialization should go in a **main entry point or setup file**. Ask the user to confirm the entry point file(s) where initialization should be added.
 
 #### (c) Which libraries to instrument
-Scan dependencies and ask user to confirm which LLM libraries they want wrapped.
+Follow the discovery process in Step 3 to find all LLM libraries, then confirm with user which ones to wrap.
 
-### Step 3: Read Language Reference & Fetch Docs
+### Step 3: Discover Libraries to Instrument
 
-For the detected language:
-1. Read the corresponding reference file from `references/` (e.g., `references/python.md`)
-2. **Fetch the documentation** from the URLs provided to get installation and instrumentation patterns
+Follow this three-part process:
+
+#### (a) Search for known integrations in user's code
+1. Read the language reference file (e.g., `references/python.md`)
+2. It lists common libraries to look for in dependency files
+3. These lists are **not exhaustive** - they're starting points
+
+#### (b) Search Braintrust docs for instrumentation patterns
+For each library found, fetch the Braintrust documentation to find how to instrument it. See the documentation URLs in the language reference file.
+
+#### (c) Search SDK repos for additional integrations
+The SDK repos may have newer integrations. Fetch the SDK README (URL in reference file) to find additional supported libraries.
 
 ### Step 4: Install SDK and Instrument
 

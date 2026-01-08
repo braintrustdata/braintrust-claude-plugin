@@ -9,8 +9,14 @@
 | Go package docs | https://pkg.go.dev/github.com/braintrustdata/braintrust-sdk-go |
 | Tracing guide | https://www.braintrust.dev/docs/guides/tracing |
 
-## Common Libraries to Detect
+## Libraries to Detect
 
-Look for these in `go.mod`:
+Search `go.mod` for these packages.
+
+### AI Providers
+
 - `github.com/sashabaranov/go-openai`
 - `github.com/anthropics/anthropic-sdk-go`
+- `github.com/google/generative-ai-go`
+
+**This list may not be complete.** Search the documentation URLs above for the current list of supported integrations.

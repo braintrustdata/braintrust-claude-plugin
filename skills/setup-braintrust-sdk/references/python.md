@@ -10,12 +10,34 @@
 | Wrap AI providers | https://www.braintrust.dev/docs/guides/tracing/wrap-ai-sdk |
 | Framework integrations | https://www.braintrust.dev/docs/guides/tracing/integrate-frameworks |
 
-## Common Libraries to Detect
+## Libraries to Detect
 
-Look for these in `requirements.txt` or `pyproject.toml`:
+Search `requirements.txt`, `pyproject.toml`, or `Pipfile` for these packages.
+
+### AI Providers
+
 - `openai`
 - `anthropic`
 - `google-generativeai`
+- `boto3` (for Bedrock)
+- `azure-openai`
+- `mistralai`
+- `groq`
+- `together`
+- `replicate`
+- `cohere`
+- `fireworks-ai`
+- `cerebras`
+
+### Frameworks
+
 - `langchain` / `langchain-core`
 - `llama-index`
-- `dspy`
+- `dspy` / `dspy-ai`
+- `litellm`
+- `instructor`
+- `pydantic-ai`
+- `crewai`
+- `autogen` / `pyautogen`
+
+**This list may not be complete.** Search the documentation URLs above for the current list of supported integrations.

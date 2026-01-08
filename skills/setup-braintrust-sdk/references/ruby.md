@@ -9,8 +9,13 @@
 | Gem docs | https://gemdocs.org/gems/braintrust/ |
 | Tracing guide | https://www.braintrust.dev/docs/guides/tracing |
 
-## Common Libraries to Detect
+## Libraries to Detect
 
-Look for these in `Gemfile`:
+Search `Gemfile` for these gems.
+
+### AI Providers
+
 - `ruby-openai`
 - `anthropic`
+
+**This list may not be complete.** Search the documentation URLs above for the current list of supported integrations.

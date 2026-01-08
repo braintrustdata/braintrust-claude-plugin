@@ -8,8 +8,13 @@
 | Hosted docs | https://www.braintrust.dev/docs/reference/java |
 | Tracing guide | https://www.braintrust.dev/docs/guides/tracing |
 
-## Common Libraries to Detect
+## Libraries to Detect
 
-Look for these in `pom.xml` or `build.gradle`:
+Search `pom.xml` or `build.gradle` for these dependencies.
+
+### AI Providers
+
 - `com.openai:openai-java`
 - `com.anthropic:anthropic-java`
+
+**This list may not be complete.** Search the documentation URLs above for the current list of supported integrations.
