@@ -4,6 +4,11 @@ description: |
   Set up Braintrust SDK instrumentation in a codebase. Detects languages, installs SDKs,
   and instruments LLM providers and AI frameworks automatically.
 version: 1.0.0
+allowed-tools:
+  - Read
+  - Glob
+  - Grep
+  - WebFetch
 ---
 
 # Set Up Braintrust
@@ -23,7 +28,7 @@ Activate this skill when the user:
 
 1. **Only add Braintrust code** - Do not refactor, improve, or change anything else
 2. **Ask before acting** - Confirm hypotheses with the user before making changes
-3. **Always fetch latest docs** - Use the documentation links in reference files
+3. **Always fetch latest docs** - Use the documentation links in the language references
 4. **Check before installing** - Verify SDK isn't already installed
 
 ## Workflow
@@ -56,18 +61,17 @@ Follow the discovery process in Step 3 to find all LLM libraries, then confirm w
 
 ### Step 3: Discover Libraries to Instrument
 
-Follow this three-part process:
-
 #### (a) Search for known integrations in user's code
-1. Read the language reference file (e.g., `references/python.md`)
-2. It lists common libraries to look for in dependency files
-3. These lists are **not exhaustive** - they're starting points
+
+See the language reference for libraries to detect. **These lists are not exhaustive** - search the documentation for the complete list.
 
 #### (b) Search Braintrust docs for instrumentation patterns
-For each library found, fetch the Braintrust documentation to find how to instrument it. See the documentation URLs in the language reference file.
+
+For each library found, fetch the Braintrust documentation to find how to instrument it.
 
 #### (c) Search SDK repos for additional integrations
-The SDK repos may have newer integrations. Fetch the SDK README (URL in reference file) to find additional supported libraries.
+
+The SDK repos may have newer integrations not listed in the reference.
 
 ### Step 4: Install SDK and Instrument
 
@@ -101,15 +105,11 @@ Guide the user through verification:
 
 ## Language References
 
-Read the appropriate reference file for documentation links:
-
-| Language | Reference File |
-|----------|---------------|
-| Python | [references/python.md](references/python.md) |
-| TypeScript/JS | [references/typescript.md](references/typescript.md) |
-| Go | [references/go.md](references/go.md) |
-| Java | [references/java.md](references/java.md) |
-| Ruby | [references/ruby.md](references/ruby.md) |
+- [Python](references/python.md)
+- [TypeScript/JavaScript](references/typescript.md)
+- [Go](references/go.md)
+- [Java](references/java.md)
+- [Ruby](references/ruby.md)
 
 ## What NOT to Do
 
