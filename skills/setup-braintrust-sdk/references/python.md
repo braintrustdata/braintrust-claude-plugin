@@ -11,6 +11,12 @@ Install the latest version and pin it:
    - `requirements.txt`: `braintrust==X.Y.Z`
    - `pyproject.toml`: `braintrust = "X.Y.Z"`
    - `Pipfile`: `braintrust = "==X.Y.Z"`
+3. **Verify the wrapper function exists** before writing instrumentation code:
+   ```bash
+   python -c "from braintrust import <wrapper_function>"
+   ```
+   Replace `<wrapper_function>` with the function you plan to use (e.g., `wrap_openai`).
+   If this fails, check the documentation for the correct function name.
 
 ## Documentation
 
