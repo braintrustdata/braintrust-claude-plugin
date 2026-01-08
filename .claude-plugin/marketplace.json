@@ -21,6 +21,13 @@
       "version": "1.0.0",
       "source": "./skills/trace-claude-code",
       "category": "observability"
+    },
+    {
+      "name": "setup-braintrust-sdk",
+      "description": "Set up Braintrust SDK instrumentation in your codebase. Detects languages, installs SDKs, and instruments LLM providers and AI frameworks.",
+      "version": "1.0.0",
+      "source": "./skills/setup-braintrust-sdk",
+      "category": "development"
     }
   ]
 }
