@@ -83,11 +83,18 @@ The SDK repos may have newer integrations not listed in the reference.
 Using the fetched documentation:
 
 1. **Check if Braintrust SDK is already installed**
-   - If not installed, install the **latest version** and pin it to a specific version number
-   - See the language reference for installation instructions
 
-2. Add initialization code to the entry point
-3. Wrap the LLM libraries the user confirmed
+2. **If not installed, fetch the latest version number BEFORE adding to dependencies**
+   - **REQUIRED**: Use WebFetch to get the current version from the package registry API
+   - See the language reference for the specific API URL to fetch
+   - Example for Python: fetch `https://pypi.org/pypi/braintrust/json` and read `info.version`
+   - **Do NOT guess or use a version from memory** - always fetch the live version
+
+3. Add the SDK to dependencies with the fetched version number
+
+4. Add initialization code to the entry point
+
+5. Wrap the LLM libraries the user confirmed
 
 ### Step 5: Configure Environment Variable
 
