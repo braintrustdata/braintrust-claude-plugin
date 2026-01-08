@@ -45,9 +45,9 @@ Search for these files to detect which languages are in use:
 | Java | `pom.xml`, `build.gradle`, `build.gradle.kts`, `*.java` |
 | Ruby | `Gemfile`, `*.rb` |
 
-### Step 2: Confirm Three Things with User
+### Step 2: Confirm with User
 
-You must clarify these three things before making changes:
+You must clarify these things before making changes:
 
 #### (a) Which application(s) to instrument
 - If the codebase has multiple apps/services, ask which ones need Braintrust
@@ -58,6 +58,11 @@ Braintrust initialization should go in a **main entry point or setup file**. Ask
 
 #### (c) Which libraries to instrument
 Follow the discovery process in Step 3 to find all LLM libraries, then confirm with user which ones to wrap.
+
+#### (d) Project name
+Ask the user what Braintrust project name to use. This will be passed to `init_logger(project="<name>")`.
+- Suggest using the app/repo name as default
+- The project will be created automatically if it doesn't exist
 
 ### Step 3: Discover Libraries to Instrument
 
@@ -97,15 +102,22 @@ BRAINTRUST_API_KEY=<your-api-key-here>
 Tell them to set the environment variable manually.
 
 Always inform user:
-- Get API key from: https://www.braintrust.dev/app/settings/api-keys
+- Get API key from: [Braintrust API Keys](https://www.braintrust.dev/app/settings/api-keys)
 
 ### Step 6: Verify Setup
 
 Guide the user through verification:
 1. Run your application and make an LLM call
-2. Go to https://www.braintrust.dev
-3. Navigate to your project
-4. Click **Logs** to see traced requests
+2. View traces in Braintrust:
+   - Direct link: `https://www.braintrust.dev/app/<org>/p/<project-name>/logs`
+     - Replace `<org>` with their organization name
+     - Replace `<project-name>` with the project name from Step 2(d)
+   - Or browse: [Braintrust Dashboard](https://www.braintrust.dev) and navigate to the project
+
+When presenting the link to the user, construct the actual URL with their org and project name, e.g.:
+```
+View your traces: https://www.braintrust.dev/app/acme-corp/p/my-project/logs
+```
 
 ## Language References
 
