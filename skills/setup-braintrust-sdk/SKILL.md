@@ -76,7 +76,15 @@ The SDK repos may have newer integrations not listed in the reference.
 ### Step 4: Install SDK and Instrument
 
 Using the fetched documentation:
-1. Install the Braintrust SDK (check if already installed first)
+
+1. **Check if Braintrust SDK is already installed**
+   - If not installed, install the **latest version**:
+     - Python: `pip install braintrust` or add `braintrust` to requirements.txt/pyproject.toml
+     - TypeScript: `npm install braintrust@latest`
+     - Go: `go get github.com/braintrustdata/braintrust-sdk-go@latest`
+     - Java: Add latest version from Maven Central
+     - Ruby: `gem install braintrust` or add `gem 'braintrust'` to Gemfile
+
 2. Add initialization code to the entry point
 3. Wrap the LLM libraries the user confirmed
 
