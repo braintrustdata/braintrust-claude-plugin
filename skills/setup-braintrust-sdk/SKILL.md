@@ -113,9 +113,23 @@ Always inform user:
 
 ### Step 6: Verify Setup
 
-Guide the user through verification:
-1. Run your application and make an LLM call
-2. View traces in Braintrust:
+1. **Build the app and verify it's working**
+   - Run the build/install command for the project
+   - Fix any import errors or missing dependencies
+
+2. **Run the app to trigger an LLM call**
+   - Execute the application so it makes at least one traced LLM request
+
+3. **Query Braintrust to verify logs were received**
+   - Use the Braintrust API to check for recent logs in the project
+   - API endpoint: `https://api.braintrust.dev/v1/project_logs/<project_id>/fetch`
+   - If no logs found, debug:
+     - Check BRAINTRUST_API_KEY is set correctly
+     - Check `init_logger()` is being called
+     - Check the wrapper is applied to the client
+   - Repeat steps 2-3 until logs appear
+
+4. **Provide the link to view traces**
    - Direct link: `https://www.braintrust.dev/app/<org>/p/<project-name>/logs`
      - Replace `<org>` with their organization name
      - Replace `<project-name>` with the project name from Step 2(d)
