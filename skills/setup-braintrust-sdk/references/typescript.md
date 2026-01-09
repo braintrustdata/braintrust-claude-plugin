@@ -1,13 +1,33 @@
 # TypeScript/JavaScript SDK
 
-## Installation
+## Fetch Latest Version
 
-Install the latest version (npm will pin it in package.json):
+Fetch `https://registry.npmjs.org/braintrust/latest` and read `version`
 
-1. Find the latest version:
-   - Fetch https://registry.npmjs.org/braintrust/latest and read `version`
-   - Or visit: https://www.npmjs.com/package/braintrust
-2. Install with: `npm install braintrust@X.Y.Z` or `yarn add braintrust@X.Y.Z`
+Or visit: https://www.npmjs.com/package/braintrust
+
+## Add to Dependencies
+
+```bash
+# npm
+npm install braintrust@X.Y.Z
+
+# yarn
+yarn add braintrust@X.Y.Z
+
+# pnpm
+pnpm add braintrust@X.Y.Z
+```
+
+## Verify Installation
+
+Test that the SDK is installed:
+
+```bash
+node -e "require('braintrust')"
+# or for ESM
+node -e "import('braintrust')"
+```
 
 ## Documentation
 
@@ -17,32 +37,3 @@ Install the latest version (npm will pin it in package.json):
 | Hosted docs | https://www.braintrust.dev/docs/reference/typescript |
 | npm | https://www.npmjs.com/package/braintrust |
 | Tracing guide | https://www.braintrust.dev/docs/guides/tracing |
-| Wrap AI providers | https://www.braintrust.dev/docs/guides/tracing/wrap-ai-sdk |
-| Framework integrations | https://www.braintrust.dev/docs/guides/tracing/integrate-frameworks |
-
-## Libraries to Detect
-
-Search `package.json` dependencies for these packages.
-
-### AI Providers
-
-- `openai`
-- `@anthropic-ai/sdk`
-- `@google/generative-ai`
-- `@aws-sdk/client-bedrock-runtime`
-- `@azure/openai`
-- `@mistralai/mistralai`
-- `groq-sdk`
-- `together-ai`
-- `replicate`
-- `cohere-ai`
-
-### Frameworks
-
-- `langchain` / `@langchain/core`
-- `llamaindex`
-- `ai` (Vercel AI SDK)
-- `litellm`
-- `instructor`
-
-**This list may not be complete.** Search the documentation URLs above for the current list of supported integrations.

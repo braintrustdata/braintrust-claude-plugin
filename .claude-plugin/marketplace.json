@@ -24,9 +24,23 @@
     },
     {
       "name": "setup-braintrust-sdk",
-      "description": "Set up Braintrust SDK instrumentation in your codebase. Detects languages, installs SDKs, and instruments LLM providers and AI frameworks.",
-      "version": "1.0.0",
+      "description": "Set up Braintrust SDK instrumentation in your codebase. Installs SDK, discovers integrations, and instruments LLM providers.",
+      "version": "2.0.0",
       "source": "./skills/setup-braintrust-sdk",
+      "category": "development"
+    },
+    {
+      "name": "discover-sdk-integrations",
+      "description": "Discover LLM providers and AI frameworks in a codebase that can be instrumented with Braintrust.",
+      "version": "1.0.0",
+      "source": "./skills/discover-sdk-integrations",
+      "category": "development"
+    },
+    {
+      "name": "install-sdk-integration",
+      "description": "Add Braintrust instrumentation to LLM providers and AI frameworks. Wraps clients and adds initialization.",
+      "version": "1.0.0",
+      "source": "./skills/install-sdk-integration",
       "category": "development"
     }
   ]

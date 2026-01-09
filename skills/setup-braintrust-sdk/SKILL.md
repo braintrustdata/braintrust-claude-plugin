@@ -3,17 +3,20 @@ name: setup-braintrust-sdk
 description: |
   Set up Braintrust SDK instrumentation in a codebase. Detects languages, installs SDKs,
   and instruments LLM providers and AI frameworks automatically.
-version: 1.0.0
+version: 2.0.0
 allowed-tools:
   - Read
   - Glob
   - Grep
   - WebFetch
+  - Bash
+  - Edit
+  - Write
 ---
 
 # Set Up Braintrust
 
-This skill guides you through setting up Braintrust SDK instrumentation in a user's codebase. Use this when a user wants to add Braintrust tracing, logging, or observability to their AI application.
+This skill sets up Braintrust SDK instrumentation in a user's codebase.
 
 ## When to Use This Skill
 
@@ -22,20 +25,26 @@ Activate this skill when the user:
 - Asks to "install the Braintrust SDK" or "install Braintrust"
 - Wants to add tracing/observability to their LLM application
 - Mentions wanting to log LLM calls to Braintrust
-- Asks about instrumenting their AI code with Braintrust
 
 ## Important Principles
 
 1. **Only add Braintrust code** - Do not refactor, improve, or change anything else
-2. **Ask before acting** - Confirm hypotheses with the user before making changes
-3. **Always fetch latest docs** - Use the documentation links in the language references
-4. **Check before installing** - Verify SDK isn't already installed
+2. **Ask before acting** - Confirm with the user before making changes
+3. **Always fetch latest docs** - Use documentation links, don't rely on memory
+4. **Verify at each step** - Build and test before moving to next step
 
-## Workflow
+## Workflow Overview
 
-### Step 1: Detect Languages
+1. **Install SDK** - Detect language, install latest SDK version
+2. **Discover Integrations** - Find LLM providers and frameworks in codebase
+3. **Instrument** - Add wrapper code and initialization
+4. **Verify** - Build, run, and confirm traces appear
 
-Search for these files to detect which languages are in use:
+## Step 1: Install the SDK
+
+### 1a. Detect Language
+
+Search for these files to detect which language to install for:
 
 | Language | Detection Files |
 |----------|-----------------|
@@ -45,97 +54,79 @@ Search for these files to detect which languages are in use:
 | Java | `pom.xml`, `build.gradle`, `build.gradle.kts`, `*.java` |
 | Ruby | `Gemfile`, `*.rb` |
 
-### Step 2: Confirm with User
+### 1b. Check if Already Installed
 
-You must clarify these things before making changes:
+Search the dependency file for `braintrust`. If already installed, report the version and continue to Step 2.
 
-#### (a) Which application(s) to instrument
-- If the codebase has multiple apps/services, ask which ones need Braintrust
-- Don't assume - let the user specify
+### 1c. Fetch Latest Version
 
-#### (b) Where to inject setup code
-Braintrust initialization should go in a **main entry point or setup file**. Ask the user to confirm the entry point file(s) where initialization should be added.
+**REQUIRED**: Use WebFetch to get the current version from the package registry API.
 
-#### (c) Which libraries to instrument
-Follow the discovery process in Step 3 to find all LLM libraries, then confirm with user which ones to wrap.
+See the [language references](#language-references) for the specific API URL to fetch.
 
-#### (d) Project name
-Ask the user what Braintrust project name to use. This will be passed to `init_logger(project="<name>")`.
-- Suggest using the app/repo name as default
-- The project will be created automatically if it doesn't exist
+**Do NOT guess or use a version from memory** - always fetch the live version.
 
-### Step 3: Discover Libraries to Instrument
+### 1d. Add to Dependencies and Install
 
-#### (a) Search for known integrations in user's code
+Add the SDK to the project's dependency file with the fetched version number, then run the install command.
 
-See the language reference for libraries to detect. **These lists are not exhaustive** - search the documentation for the complete list.
+### 1e. Verify Installation
 
-#### (b) Search Braintrust docs for instrumentation patterns
+Verify the SDK is installed correctly by testing an import. See language reference for verification command.
 
-For each library found, fetch the Braintrust documentation to find how to instrument it.
+## Step 2: Discover Integrations
 
-#### (c) Search SDK repos for additional integrations
+Follow the [discover-sdk-integrations](../discover-sdk-integrations/SKILL.md) skill:
 
-The SDK repos may have newer integrations not listed in the reference.
+1. Search for LLM providers (OpenAI, Anthropic, etc.)
+2. Search for AI frameworks (LangChain, LlamaIndex, etc.)
+3. Report findings to user
+4. Confirm which integrations to instrument
 
-### Step 4: Install SDK and Instrument
+## Step 3: Instrument Code
 
-Using the fetched documentation:
+Follow the [install-sdk-integration](../install-sdk-integration/SKILL.md) skill:
 
-1. **Check if Braintrust SDK is already installed**
+1. Confirm entry point file
+2. Get project name from user
+3. Fetch latest instrumentation docs
+4. Add `init_logger()` call
+5. Wrap confirmed LLM clients
+6. Configure environment variable (API key)
 
-2. **If not installed, fetch the latest version number BEFORE adding to dependencies**
-   - **REQUIRED**: Use WebFetch to get the current version from the package registry API
-   - See the language reference for the specific API URL to fetch
-   - Example for Python: fetch `https://pypi.org/pypi/braintrust/json` and read `info.version`
-   - **Do NOT guess or use a version from memory** - always fetch the live version
+## Step 4: Verify Setup
 
-3. Add the SDK to dependencies with the fetched version number
+This step uses a **try-do-verify loop** to ensure tracing is working.
 
-4. Add initialization code to the entry point
+### 4a. Build the app
 
-5. Wrap the LLM libraries the user confirmed
+Run the build/install command for the project. Fix any import errors or missing dependencies before proceeding.
 
-### Step 5: Configure Environment Variable
+### 4b. Verification Loop
 
-Ask the user which option they prefer:
-
-**Option A: Add to .env file**
 ```
-BRAINTRUST_API_KEY=<your-api-key-here>
+WHILE traces not appearing:
+  1. TRY: Run the app to trigger an LLM call
+  2. DO: Query Braintrust API to check for logs
+  3. VERIFY: Did logs appear?
+     - YES: Exit loop, proceed to 4c
+     - NO: Debug and fix:
+       - Check BRAINTRUST_API_KEY is set correctly
+       - Check init_logger() is being called
+       - Check the wrapper is applied to the client
+       - Check console for any error messages
+     - REPEAT from step 1
 ```
 
-**Option B: Provide instructions only**
-Tell them to set the environment variable manually.
+API endpoint to check logs: `https://api.braintrust.dev/v1/project_logs/<project_id>/fetch`
 
-Always inform user:
-- Get API key from: [Braintrust API Keys](https://www.braintrust.dev/app/settings/api-keys)
+### 4c. Success - Provide Link
 
-### Step 6: Verify Setup
+Once traces appear, provide the link to view them:
+- Direct link: `https://www.braintrust.dev/app/<org>/p/<project-name>/logs`
+- Or browse: [Braintrust Dashboard](https://www.braintrust.dev)
 
-1. **Build the app and verify it's working**
-   - Run the build/install command for the project
-   - Fix any import errors or missing dependencies
-
-2. **Run the app to trigger an LLM call**
-   - Execute the application so it makes at least one traced LLM request
-
-3. **Query Braintrust to verify logs were received**
-   - Use the Braintrust API to check for recent logs in the project
-   - API endpoint: `https://api.braintrust.dev/v1/project_logs/<project_id>/fetch`
-   - If no logs found, debug:
-     - Check BRAINTRUST_API_KEY is set correctly
-     - Check `init_logger()` is being called
-     - Check the wrapper is applied to the client
-   - Repeat steps 2-3 until logs appear
-
-4. **Provide the link to view traces**
-   - Direct link: `https://www.braintrust.dev/app/<org>/p/<project-name>/logs`
-     - Replace `<org>` with their organization name
-     - Replace `<project-name>` with the project name from Step 2(d)
-   - Or browse: [Braintrust Dashboard](https://www.braintrust.dev) and navigate to the project
-
-When presenting the link to the user, construct the actual URL with their org and project name, e.g.:
+Construct the actual URL with their org and project name:
 ```
 View your traces: https://www.braintrust.dev/app/acme-corp/p/my-project/logs
 ```
