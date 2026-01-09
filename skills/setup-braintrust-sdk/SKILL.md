@@ -96,39 +96,58 @@ Follow the [install-sdk-integration](../install-sdk-integration/SKILL.md) skill:
 
 ## Step 4: Verify Setup
 
-This step uses a **try-do-verify loop** to ensure tracing is working.
+**Do NOT skip verification. The setup is not complete until traces appear in Braintrust.**
 
 ### 4a. Build the app
 
-Run the build/install command for the project. Fix any import errors or missing dependencies before proceeding.
+Run the build/install command (e.g., `pip install -r requirements.txt`, `npm install`). Fix any errors before proceeding.
 
-### 4b. Verification Loop
+### 4b. Get the run command
 
+Ask the user: "What command should I run to test the app?"
+
+Or try to detect it:
+- Look for `package.json` scripts (npm start, npm run dev)
+- Look for `main.py`, `app.py`, or entry points
+- Look for `Makefile` targets
+
+### 4c. Run the app
+
+Either:
+1. **Run it yourself** if you have the command and BRAINTRUST_API_KEY is set
+2. **Ask the user to run it** if you need them to provide API keys or credentials
+
+If asking the user, say:
 ```
-WHILE traces not appearing:
-  1. TRY: Run the app to trigger an LLM call
-  2. DO: Query Braintrust API to check for logs
-  3. VERIFY: Did logs appear?
-     - YES: Exit loop, proceed to 4c
-     - NO: Debug and fix:
-       - Check BRAINTRUST_API_KEY is set correctly
-       - Check init_logger() is being called
-       - Check the wrapper is applied to the client
-       - Check console for any error messages
-     - REPEAT from step 1
+Please run the app and let me know if you see any errors.
+Once it runs successfully, I'll verify the traces appeared.
 ```
 
-API endpoint to check logs: `https://api.braintrust.dev/v1/project_logs/<project_id>/fetch`
+### 4d. Verify traces appeared
 
-### 4c. Success - Provide Link
+Query the Braintrust API to check if logs were received:
 
-Once traces appear, provide the link to view them:
-- Direct link: `https://www.braintrust.dev/app/<org>/p/<project-name>/logs`
-- Or browse: [Braintrust Dashboard](https://www.braintrust.dev)
-
-Construct the actual URL with their org and project name:
+```bash
+curl -H "Authorization: Bearer $BRAINTRUST_API_KEY" \
+  "https://api.braintrust.dev/v1/project_logs/<project_id>/fetch?limit=1"
 ```
-View your traces: https://www.braintrust.dev/app/acme-corp/p/my-project/logs
+
+Or ask the user to check the Braintrust dashboard.
+
+### 4e. Debug Loop
+
+If traces don't appear:
+1. Check the app output for error messages
+2. Verify BRAINTRUST_API_KEY is correct
+3. Verify `init_logger()` is being called
+4. Verify the wrapper is applied to the client
+5. Fix the issue and **repeat from 4c**
+
+### 4f. Success
+
+Once traces appear, provide the link:
+```
+View your traces: https://www.braintrust.dev/app/<org>/p/<project-name>/logs
 ```
 
 ## Language References
