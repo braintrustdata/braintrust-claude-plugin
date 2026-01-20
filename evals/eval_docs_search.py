@@ -159,7 +159,6 @@ Eval(
     scores=[criteria_scorer],
     metadata={
         "description": "Tests agent's ability to answer Braintrust documentation questions",
-        "skill": "using-braintrust",
         "category": "docs_search",
     },
 )

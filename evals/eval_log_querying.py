@@ -126,7 +126,6 @@ Eval(
     scores=[criteria_scorer],
     metadata={
         "description": "Tests agent's ability to write correct SQL queries and log operations",
-        "skill": "using-braintrust",
         "category": "log_querying",
     },
 )

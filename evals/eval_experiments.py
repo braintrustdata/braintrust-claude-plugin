@@ -142,7 +142,6 @@ Eval(
     scores=[criteria_scorer],
     metadata={
         "description": "Tests agent's ability to create, run, and analyze Braintrust experiments",
-        "skill": "using-braintrust",
         "category": "experiments",
     },
 )

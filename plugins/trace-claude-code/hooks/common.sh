@@ -88,13 +88,14 @@ check_requirements() {
     return 0
 }
 
-# Get or create project ID (cached)
+# Get or create project ID (cached per project name)
 get_project_id() {
     local name="$1"
+    local cache_key="project_id_$name"
 
     # Check cache first
     local cached_id
-    cached_id=$(get_state_value "project_id")
+    cached_id=$(get_state_value "$cache_key")
     if [ -n "$cached_id" ]; then
         echo "$cached_id"
         return 0
@@ -112,7 +113,7 @@ get_project_id() {
     pid=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
 
     if [ -n "$pid" ]; then
-        set_state_value "project_id" "$pid"
+        set_state_value "$cache_key" "$pid"
         echo "$pid"
         return 0
     fi
@@ -124,7 +125,7 @@ get_project_id() {
     pid=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
 
     if [ -n "$pid" ]; then
-        set_state_value "project_id" "$pid"
+        set_state_value "$cache_key" "$pid"
         echo "$pid"
         return 0
     fi

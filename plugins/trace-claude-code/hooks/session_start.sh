@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 debug "SessionStart hook triggered"
+debug "TRACE_TO_BRAINTRUST=$TRACE_TO_BRAINTRUST"
 
 tracing_enabled || { debug "Tracing disabled"; exit 0; }
 check_requirements || exit 0

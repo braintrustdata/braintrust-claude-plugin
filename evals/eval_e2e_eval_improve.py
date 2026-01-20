@@ -14,6 +14,7 @@ Run with: braintrust eval evals/eval_e2e_eval_improve.py
 """
 
 import asyncio
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -30,41 +31,43 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 TEST_RUN_ID = str(uuid.uuid4())[:8]
 TEST_PROJECT_NAME = f"skill-eval-experiment-{TEST_RUN_ID}"
 
-# Load skill content
-SKILL_PATH = Path(__file__).parent.parent / "skill" / "SKILL.md"
-SKILL_CONTENT = SKILL_PATH.read_text() if SKILL_PATH.exists() else ""
-
 # Setup Claude Agent SDK patching
 setup_claude_agent_sdk()
 
+# MCP server configuration for Braintrust
+MCP_SERVERS = {
+    "braintrust": {
+        "type": "http",
+        "url": "https://api.braintrust.dev/mcp",
+        "headers": {"Authorization": f"Bearer {os.environ.get('BRAINTRUST_API_KEY', '')}"},
+    }
+}
 
-async def run_claude_agent(prompt: str, max_turns: int = 15, use_skill: bool = True) -> dict:
+
+async def run_claude_agent(prompt: str, max_turns: int = 15, use_mcp: bool = True) -> dict:
     """
     Run Claude Agent with code execution enabled.
+
+    Args:
+        prompt: The prompt to send to Claude
+        max_turns: Maximum number of conversation turns
+        use_mcp: If True, connect the Braintrust MCP server for enhanced capabilities
     """
-    base_prompt = """You are an expert at Braintrust, an LLM evaluation platform.
+    system_prompt = """You are an expert at Braintrust, an LLM evaluation platform.
 You have access to code execution. Use Python to complete the tasks.
-Be concise and execute code directly - don't just explain."""
+Be concise and execute code directly - don't just explain.
 
-    if use_skill and SKILL_CONTENT:
-        system_prompt = f"""{base_prompt}
-
-Here is the reference documentation for using Braintrust:
-
-{SKILL_CONTENT}
-
-Follow the examples in the documentation exactly. Pay special attention to:
+When running evals, use braintrust.Eval() with proper task and scorer functions.
+Pay special attention to:
 - Eval() takes the project name as the FIRST POSITIONAL argument, not a keyword argument
 - Always call logger.flush() after logging"""
-    else:
-        system_prompt = f"""{base_prompt}
-When running evals, use braintrust.Eval() with proper task and scorer functions."""
 
     options = ClaudeAgentOptions(
         model="claude-sonnet-4-5-20250929",
         system_prompt=system_prompt,
         max_turns=max_turns,
         permission_mode="bypassPermissions",
+        mcp_servers=MCP_SERVERS if use_mcp else {},
     )
 
     success = False
@@ -319,7 +322,6 @@ Eval(
     scores=[experiments_created_scorer, task_completed_scorer, eval_ran_scorer],
     metadata={
         "description": "Tests Claude's ability to create and run experiments, verified via Braintrust API",
-        "skill": "using-braintrust",
         "category": "e2e",
         "test_run_id": TEST_RUN_ID,
         "test_project": TEST_PROJECT_NAME,

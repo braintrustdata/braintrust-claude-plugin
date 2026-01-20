@@ -12,6 +12,7 @@ Run with: braintrust eval evals/eval_e2e_log_fetch.py
 """
 
 import asyncio
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -28,42 +29,44 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 TEST_RUN_ID = str(uuid.uuid4())[:8]
 TEST_PROJECT_NAME = f"skill-eval-e2e-{TEST_RUN_ID}"
 
-# Load skill content
-SKILL_PATH = Path(__file__).parent.parent / "skill" / "SKILL.md"
-SKILL_CONTENT = SKILL_PATH.read_text() if SKILL_PATH.exists() else ""
-
 # Setup Claude Agent SDK patching (will trace within parent span context)
 setup_claude_agent_sdk()
 
+# MCP server configuration for Braintrust
+MCP_SERVERS = {
+    "braintrust": {
+        "type": "http",
+        "url": "https://api.braintrust.dev/mcp",
+        "headers": {"Authorization": f"Bearer {os.environ.get('BRAINTRUST_API_KEY', '')}"},
+    }
+}
 
-async def run_claude_agent(prompt: str, max_turns: int = 10, use_skill: bool = True) -> dict:
+
+async def run_claude_agent(prompt: str, max_turns: int = 10, use_mcp: bool = True) -> dict:
     """
     Run Claude Agent with code execution enabled and collect results.
     Returns dict with 'success', 'output', 'error' fields.
+
+    Args:
+        prompt: The prompt to send to Claude
+        max_turns: Maximum number of conversation turns
+        use_mcp: If True, connect the Braintrust MCP server for enhanced capabilities
     """
-    base_prompt = """You are an expert at Braintrust, an LLM evaluation platform.
+    system_prompt = """You are an expert at Braintrust, an LLM evaluation platform.
 You have access to code execution. Use Python to complete the tasks.
-Be concise and execute code directly - don't just explain."""
+Be concise and execute code directly - don't just explain.
 
-    if use_skill and SKILL_CONTENT:
-        system_prompt = f"""{base_prompt}
-
-Here is the reference documentation for using Braintrust:
-
-{SKILL_CONTENT}
-
-Follow the examples in the documentation exactly. Pay special attention to:
+Always use the braintrust SDK for logging and querying.
+Pay special attention to:
 - Always call logger.flush() after logging to ensure data is sent
 - Use init_logger(project="name") to create a logger"""
-    else:
-        system_prompt = f"""{base_prompt}
-Always use the braintrust SDK for logging and querying."""
 
     options = ClaudeAgentOptions(
         model="claude-sonnet-4-5-20250929",
         system_prompt=system_prompt,
         max_turns=max_turns,
         permission_mode="bypassPermissions",
+        mcp_servers=MCP_SERVERS if use_mcp else {},
     )
 
     success = False
@@ -354,7 +357,6 @@ Eval(
     scores=[logs_created_scorer, correct_count_scorer, task_completed_scorer],
     metadata={
         "description": "Tests Claude's ability to log data, verified by querying Braintrust directly",
-        "skill": "using-braintrust",
         "category": "e2e",
         "test_run_id": TEST_RUN_ID,
         "test_project": TEST_PROJECT_NAME,
@@ -369,7 +371,6 @@ Eval(
     scores=[sql_query_scorer, task_completed_scorer],
     metadata={
         "description": "Tests Claude's ability to query logs using SQL syntax",
-        "skill": "using-braintrust",
         "category": "e2e",
         "test_run_id": TEST_RUN_ID,
     },
