@@ -36,17 +36,23 @@ Automatically traces Claude Code conversations to Braintrust. Captures sessions,
 
 ```bash
 claude plugin install trace-claude-code@braintrust-claude-plugin
+# run the setup script to confgure tracing
+$HOME/.claude/plugins/marketplaces/braintrust-claude-plugin/plugins/trace-claude-code/setup.sh
 ```
 
-To enable tracing, add the following to your `~/.claude/settings.json` or your project's `.claude/settings.local.json`:
+Traces are sent to the `claude-code` project by default.
+
+#### manual configuration
+
+Instead of running `setup.sh`, you can manually edit `~/.claude/settings.json` or your project's `.claude/settings.local.json`:
 
 ```json
 {
   "env": {
     "TRACE_TO_BRAINTRUST": "true",
-    "BRAINTRUST_CC_PROJECT": "project-name-to-send-cc-traces-to"
+    "BRAINTRUST_CC_PROJECT": "project-name-to-send-cc-traces-to",
+    "BRAINTRUST_API_KEY": "sk-yourkey",
+    "BRAINTRUST_DEBUG": "false"
   }
 }
 ```
-
-Traces are sent to the `claude-code` project by default.

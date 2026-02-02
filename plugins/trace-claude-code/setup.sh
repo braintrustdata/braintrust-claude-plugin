@@ -108,64 +108,6 @@ fi
 # Create .claude directory if needed
 mkdir -p .claude
 
-# Build the hooks configuration
-HOOKS_CONFIG=$(cat <<EOF
-{
-    "SessionStart": [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash $HOOKS_DIR/session_start.sh"
-                }
-            ]
-        }
-    ],
-    "UserPromptSubmit": [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash $HOOKS_DIR/user_prompt_submit.sh"
-                }
-            ]
-        }
-    ],
-    "PostToolUse": [
-        {
-            "matcher": "*",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash $HOOKS_DIR/post_tool_use.sh"
-                }
-            ]
-        }
-    ],
-    "Stop": [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash $HOOKS_DIR/stop_hook.sh"
-                }
-            ]
-        }
-    ],
-    "SessionEnd": [
-        {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash $HOOKS_DIR/session_end.sh"
-                }
-            ]
-        }
-    ]
-}
-EOF
-)
-
 # Build environment config
 ENV_CONFIG=$(jq -n \
     --arg key "$BRAINTRUST_API_KEY" \
@@ -188,17 +130,15 @@ if [ -f "$SETTINGS_FILE" ]; then
     EXISTING=$(cat "$SETTINGS_FILE")
 
     UPDATED=$(echo "$EXISTING" | jq \
-        --argjson hooks "$HOOKS_CONFIG" \
         --argjson env "$ENV_CONFIG" \
-        '.hooks = $hooks | .env = (.env // {}) + $env')
+        '.env = (.env // {}) + $env')
 
     echo "$UPDATED" > "$SETTINGS_FILE"
 else
     # Create new settings file
     jq -n \
-        --argjson hooks "$HOOKS_CONFIG" \
         --argjson env "$ENV_CONFIG" \
-        '{hooks: $hooks, env: $env}' > "$SETTINGS_FILE"
+        '{env: $env}' > "$SETTINGS_FILE"
 fi
 
 echo ""
