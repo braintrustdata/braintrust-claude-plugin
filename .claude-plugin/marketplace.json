@@ -18,7 +18,7 @@
     {
       "name": "trace-claude-code",
       "description": "Automatically trace Claude Code conversations to Braintrust. Captures user messages, assistant responses, and tool calls for observability.",
-      "version": "1.3.1",
+      "version": "1.3.2",
       "source": "./plugins/trace-claude-code",
       "category": "observability"
     }

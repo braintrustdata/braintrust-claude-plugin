@@ -25,6 +25,7 @@ PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
 
 # Get session info
 ROOT_SPAN_ID=$(get_session_state "$SESSION_ID" "root_span_id")
+SESSION_SPAN_ID=$(get_session_state "$SESSION_ID" "session_span_id")
 PROJECT_ID=$(get_session_state "$SESSION_ID" "project_id")
 
 # If no session root exists yet, we'll create it
@@ -73,7 +74,9 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
 
     insert_span "$PROJECT_ID" "$EVENT" >/dev/null || true
     set_session_state "$SESSION_ID" "root_span_id" "$ROOT_SPAN_ID"
+    set_session_state "$SESSION_ID" "session_span_id" "$ROOT_SPAN_ID"
     set_session_state "$SESSION_ID" "project_id" "$PROJECT_ID"
+    SESSION_SPAN_ID="$ROOT_SPAN_ID"
     log "INFO" "Created session root: $SESSION_ID"
 fi
 
@@ -90,11 +93,12 @@ START_TIME=$(date +%s)
 PROMPT_PREVIEW="${PROMPT:0:100}"
 [ ${#PROMPT} -gt 100 ] && PROMPT_PREVIEW="${PROMPT_PREVIEW}..."
 
-# Create Turn container span
+# Create Turn container span (parent is the session span, not the root)
 EVENT=$(jq -n \
     --arg id "$TURN_SPAN_ID" \
     --arg span_id "$TURN_SPAN_ID" \
     --arg root_span_id "$ROOT_SPAN_ID" \
+    --arg session_span_id "$SESSION_SPAN_ID" \
     --arg created "$TIMESTAMP" \
     --arg prompt "$PROMPT" \
     --argjson turn "$TURN_COUNT" \
@@ -103,7 +107,7 @@ EVENT=$(jq -n \
         id: $id,
         span_id: $span_id,
         root_span_id: $root_span_id,
-        span_parents: [$root_span_id],
+        span_parents: [$session_span_id],
         created: $created,
         input: $prompt,
         metrics: {

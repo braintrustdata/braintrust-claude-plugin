@@ -38,8 +38,15 @@ if [ -n "$EXISTING_ROOT" ]; then
     exit 0
 fi
 
-# Create root span for the session
-ROOT_SPAN_ID="$SESSION_ID"
+# Create the session span
+# If CC_PARENT_SPAN_ID is set, this session becomes a child of an existing trace
+if [ -n "$CC_PARENT_SPAN_ID" ]; then
+    ROOT_SPAN_ID="$CC_ROOT_SPAN_ID"
+    debug "Attaching to parent span: $CC_PARENT_SPAN_ID (root: $ROOT_SPAN_ID)"
+else
+    ROOT_SPAN_ID="$SESSION_ID"
+fi
+SPAN_ID="$SESSION_ID"
 TIMESTAMP=$(get_timestamp)
 
 # Extract workspace info if available
@@ -52,8 +59,8 @@ USERNAME=$(get_username)
 OS=$(get_os)
 
 EVENT=$(jq -n \
-    --arg id "$ROOT_SPAN_ID" \
-    --arg span_id "$ROOT_SPAN_ID" \
+    --arg id "$SPAN_ID" \
+    --arg span_id "$SPAN_ID" \
     --arg root_span_id "$ROOT_SPAN_ID" \
     --arg created "$TIMESTAMP" \
     --arg session "$SESSION_ID" \
@@ -82,10 +89,16 @@ EVENT=$(jq -n \
         }
     }')
 
+# Add span_parents if attaching to an existing trace
+if [ -n "$CC_PARENT_SPAN_ID" ]; then
+    EVENT=$(echo "$EVENT" | jq --arg parent "$CC_PARENT_SPAN_ID" '. + {span_parents: [$parent]}')
+fi
+
 ROW_ID=$(insert_span "$PROJECT_ID" "$EVENT") || { log "ERROR" "Failed to create session root"; exit 0; }
 
 # Save session state
 set_session_state "$SESSION_ID" "root_span_id" "$ROOT_SPAN_ID"
+set_session_state "$SESSION_ID" "session_span_id" "$SPAN_ID"
 set_session_state "$SESSION_ID" "project_id" "$PROJECT_ID"
 set_session_state "$SESSION_ID" "turn_count" "0"
 set_session_state "$SESSION_ID" "tool_count" "0"

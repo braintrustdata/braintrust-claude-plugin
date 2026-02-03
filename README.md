@@ -56,3 +56,19 @@ Instead of running `setup.sh`, you can manually edit `~/.claude/settings.json` o
   }
 }
 ```
+
+#### add claude code trace to an existing trace
+
+You can attach a Claude Code session to an existing Braintrust trace by passing `CC_PARENT_SPAN_ID`:
+
+```bash
+claude --settings '{"env":{"CC_PARENT_SPAN_ID":"your-parent-span-id"}}' -p "task"
+```
+
+If the parent span is not the trace root, also pass `CC_ROOT_SPAN_ID`:
+
+```bash
+claude --settings '{"env":{"CC_PARENT_SPAN_ID":"parent-span-id","CC_ROOT_SPAN_ID":"root-span-id"}}' -p "task"
+```
+
+The Claude Code session and all its turns/tools will appear as children of your parent span in Braintrust.

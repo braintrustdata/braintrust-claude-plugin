@@ -11,6 +11,17 @@ export API_KEY="${BRAINTRUST_API_KEY}"
 export PROJECT="${BRAINTRUST_CC_PROJECT:-claude-code}"
 export APP_URL="${BRAINTRUST_APP_URL:-https://www.braintrust.dev}"
 
+# Parent span configuration (for attaching to an existing trace)
+# If either is set, we're attaching to an existing trace
+# Each defaults to the other if not set
+if [ -n "${CC_PARENT_SPAN_ID:-}" ] && [ -z "${CC_ROOT_SPAN_ID:-}" ]; then
+    export CC_ROOT_SPAN_ID="$CC_PARENT_SPAN_ID"
+elif [ -n "${CC_ROOT_SPAN_ID:-}" ] && [ -z "${CC_PARENT_SPAN_ID:-}" ]; then
+    export CC_PARENT_SPAN_ID="$CC_ROOT_SPAN_ID"
+fi
+export CC_PARENT_SPAN_ID="${CC_PARENT_SPAN_ID:-}"
+export CC_ROOT_SPAN_ID="${CC_ROOT_SPAN_ID:-}"
+
 # Resolve API URL via login endpoint (with caching)
 resolve_api_url() {
     # Check for explicit override first
