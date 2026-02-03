@@ -72,11 +72,18 @@ mkdir -p "$(dirname "$STATE_FILE")"
 
 # Logging
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >> "$LOG_FILE"; }
-debug() { [ "$(echo "$DEBUG" | tr '[:upper:]' '[:lower:]')" = "true" ] && log "DEBUG" "$1" || true; }
+
+# Check if a value is truthy (true, 1, yes, on - case insensitive)
+is_truthy() {
+    local val="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+    [[ "$val" == "true" || "$val" == "1" || "$val" == "yes" || "$val" == "on" ]]
+}
+
+debug() { is_truthy "$DEBUG" && log "DEBUG" "$1" || true; }
 
 # Check if tracing is enabled
 tracing_enabled() {
-    [ "$(echo "$TRACE_TO_BRAINTRUST" | tr '[:upper:]' '[:lower:]')" = "true" ]
+    is_truthy "$TRACE_TO_BRAINTRUST"
 }
 
 # Validate requirements
