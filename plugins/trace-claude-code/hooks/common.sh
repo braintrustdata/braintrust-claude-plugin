@@ -99,7 +99,7 @@ tracing_enabled() {
 
 # Validate requirements
 check_requirements() {
-    for cmd in jq curl; do
+    for cmd in jq curl uuidgen; do
         command -v "$cmd" &>/dev/null || { log "ERROR" "$cmd not installed"; return 1; }
     done
     [ -z "$API_KEY" ] && { log "ERROR" "BRAINTRUST_API_KEY not set"; return 1; }

@@ -26,13 +26,21 @@ for hook in common.sh session_start.sh post_tool_use.sh stop_hook.sh session_end
 done
 
 # Check for required tools
-for cmd in jq curl; do
+for cmd in jq curl uuidgen; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "❌ Error: $cmd is required but not installed"
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            echo "   Install with: brew install $cmd"
+            if [ "$cmd" = "uuidgen" ]; then
+                echo "   uuidgen should be pre-installed on macOS"
+            else
+                echo "   Install with: brew install $cmd"
+            fi
         else
-            echo "   Install with: sudo apt-get install $cmd"
+            if [ "$cmd" = "uuidgen" ]; then
+                echo "   Install with: sudo apt-get install uuid-runtime"
+            else
+                echo "   Install with: sudo apt-get install $cmd"
+            fi
         fi
         exit 1
     fi
