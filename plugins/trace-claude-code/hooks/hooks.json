@@ -5,7 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh",
+            "async": true
           }
         ]
       }
@@ -15,7 +16,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt_submit.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt_submit.sh",
+            "async": true
           }
         ]
       }
@@ -26,7 +28,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use.sh",
+            "async": true
           }
         ]
       }
@@ -36,7 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh",
+            "async": true
           }
         ]
       }
@@ -46,7 +50,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session_end.sh"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session_end.sh",
+            "async": true
           }
         ]
       }
