@@ -57,9 +57,10 @@ set_cache_value() {
     local key="$1"
     local value="$2"
     local cache
-    cache=$([ -f "$CACHE_FILE" ] && cat "$CACHE_FILE" || echo '{}')
-    cache=$(echo "$cache" | jq --arg k "$key" --arg v "$value" '.[$k] = $v')
-    echo "$cache" > "$CACHE_FILE"
+    cache=$([ -f "$CACHE_FILE" ] && cat "$CACHE_FILE" 2>/dev/null || echo '{}')
+    cache=$(echo "$cache" | jq --arg k "$key" --arg v "$value" '.[$k] = $v' 2>/dev/null) || return 0
+    local tmp="$CACHE_FILE.tmp.$$"
+    echo "$cache" > "$tmp" && mv "$tmp" "$CACHE_FILE"
 }
 
 # Resolve API URL via login endpoint (with caching)
