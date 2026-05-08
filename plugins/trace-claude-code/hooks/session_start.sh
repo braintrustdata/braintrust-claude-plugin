@@ -103,6 +103,8 @@ set_session_state "$SESSION_ID" "project_id" "$PROJECT_ID"
 set_session_state "$SESSION_ID" "turn_count" "0"
 set_session_state "$SESSION_ID" "tool_count" "0"
 set_session_state "$SESSION_ID" "started" "$TIMESTAMP"
+set_session_state "$SESSION_ID" "workspace_dir" "$WORKSPACE"
+set_session_state "$SESSION_ID" "initial_git_state" "$(get_git_state_hash "$WORKSPACE")"
 
 log "INFO" "Created session root: $SESSION_ID workspace=$WORKSPACE_NAME"
 

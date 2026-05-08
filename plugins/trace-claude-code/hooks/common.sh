@@ -257,3 +257,41 @@ get_username() {
 get_os() {
     uname -s 2>/dev/null || echo "unknown"
 }
+
+# Capture git diff for the current directory
+capture_git_diff() {
+    local cwd="${1:-.}"
+
+    # Check if we're in a git repo
+    if ! git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+        echo ""
+        return 0
+    fi
+
+    # Get all changes (staged and unstaged)
+    local diff_output
+    diff_output=$(git -C "$cwd" diff HEAD 2>/dev/null || echo "")
+
+    # If no diff from HEAD, try to get untracked/staged files
+    if [ -z "$diff_output" ]; then
+        diff_output=$(git -C "$cwd" diff --cached 2>/dev/null || echo "")
+    fi
+
+    echo "$diff_output"
+}
+
+# Get current git state hash for comparison
+get_git_state_hash() {
+    local cwd="${1:-.}"
+
+    if ! git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+        echo ""
+        return 0
+    fi
+
+    # Create a hash of current state (HEAD + status)
+    local state
+    state=$(git -C "$cwd" rev-parse HEAD 2>/dev/null || echo "no-git")
+    state="${state}-$(git -C "$cwd" status --porcelain 2>/dev/null | md5sum 2>/dev/null | cut -d' ' -f1 || md5 2>/dev/null || echo "no-changes")"
+    echo "$state"
+}

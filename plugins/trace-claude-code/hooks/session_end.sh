@@ -28,10 +28,13 @@ fi
 
 # Get session info
 ROOT_SPAN_ID=$(get_session_state "$SESSION_ID" "root_span_id")
+SESSION_SPAN_ID=$(get_session_state "$SESSION_ID" "session_span_id")
 PROJECT_ID=$(get_session_state "$SESSION_ID" "project_id")
 TURN_COUNT=$(get_session_state "$SESSION_ID" "turn_count")
 TOOL_COUNT=$(get_session_state "$SESSION_ID" "tool_count")
 STARTED=$(get_session_state "$SESSION_ID" "started")
+WORKSPACE_DIR=$(get_session_state "$SESSION_ID" "workspace_dir")
+INITIAL_GIT_STATE=$(get_session_state "$SESSION_ID" "initial_git_state")
 
 [ -z "$ROOT_SPAN_ID" ] && { debug "No root span for session"; exit 0; }
 [ -z "$PROJECT_ID" ] && { debug "No project ID for session"; exit 0; }
@@ -52,6 +55,50 @@ TIMESTAMP=$(get_timestamp)
 
 TURN_COUNT=${TURN_COUNT:-0}
 TOOL_COUNT=${TOOL_COUNT:-0}
+
+# Capture git diff if we have a workspace directory
+if [ -n "$WORKSPACE_DIR" ] && [ -d "$WORKSPACE_DIR" ]; then
+    debug "Capturing git diff from: $WORKSPACE_DIR"
+    CURRENT_GIT_STATE=$(get_git_state_hash "$WORKSPACE_DIR")
+
+    # Only capture diff if state has changed
+    if [ "$CURRENT_GIT_STATE" != "$INITIAL_GIT_STATE" ]; then
+        GIT_DIFF=$(capture_git_diff "$WORKSPACE_DIR")
+
+        if [ -n "$GIT_DIFF" ]; then
+            debug "Git diff captured ($(echo "$GIT_DIFF" | wc -l) lines)"
+
+            # Update the session span with the diff using merge write
+            SESSION_UPDATE=$(jq -n \
+                --arg id "${SESSION_SPAN_ID:-$ROOT_SPAN_ID}" \
+                --arg diff "$GIT_DIFF" \
+                --argjson turns "$TURN_COUNT" \
+                --argjson tools "$TOOL_COUNT" \
+                '{
+                    id: $id,
+                    _is_merge: true,
+                    output: $diff,
+                    metadata: {
+                        code_changes: $diff,
+                        turn_count: $turns,
+                        tool_count: $tools
+                    }
+                }')
+
+            insert_span "$PROJECT_ID" "$SESSION_UPDATE" >/dev/null && {
+                log "INFO" "Added git diff to session span ($(echo "$GIT_DIFF" | wc -l) lines)"
+            } || {
+                log "WARN" "Failed to add git diff to session span"
+            }
+        else
+            debug "No git diff to capture"
+        fi
+    else
+        debug "Git state unchanged"
+    fi
+else
+    debug "No workspace directory for diff capture"
+fi
 
 log "INFO" "Session ended: $SESSION_ID (turns=$TURN_COUNT, tools=$TOOL_COUNT)"
 
