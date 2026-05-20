@@ -83,6 +83,8 @@ CURRENT_TOOL_CALLS="[]"
 CURRENT_MODEL=""
 CURRENT_PROMPT_TOKENS=0
 CURRENT_COMPLETION_TOKENS=0
+CURRENT_CACHE_CREATION_TOKENS=0
+CURRENT_CACHE_READ_TOKENS=0
 CURRENT_START_TIMESTAMP=""  # ISO timestamp when this LLM call started
 CURRENT_END_TIMESTAMP=""    # ISO timestamp when this LLM call ended
 LINE_NUM=0
@@ -132,6 +134,8 @@ create_llm_span() {
     local end_ts="$6"     # ISO timestamp
     local tool_calls_json="${7:-[]}"
     local input_history="$8"  # JSON array of conversation history
+    local cache_creation_tokens="${9:-0}"
+    local cache_read_tokens="${10:-0}"
 
     # Need either text or tool_calls
     [ -z "$output_text" ] && [ "$tool_calls_json" = "[]" ] && return
@@ -168,6 +172,8 @@ create_llm_span() {
         --argjson prompt_tokens "$prompt_tokens" \
         --argjson completion_tokens "$completion_tokens" \
         --argjson tokens "$total_tokens" \
+        --argjson cache_creation_tokens "$cache_creation_tokens" \
+        --argjson cache_read_tokens "$cache_read_tokens" \
         --argjson start_time "$start_time" \
         --argjson end_time "$end_time" \
         '{
@@ -183,7 +189,9 @@ create_llm_span() {
                 end: $end_time,
                 prompt_tokens: $prompt_tokens,
                 completion_tokens: $completion_tokens,
-                tokens: $tokens
+                tokens: $tokens,
+                cache_creation_input_tokens: $cache_creation_tokens,
+                cache_read_input_tokens: $cache_read_tokens
             },
             metadata: {
                 model: $model
@@ -216,7 +224,7 @@ while IFS= read -r line; do
         if [ "$IS_TOOL_RESULT" = "true" ]; then
             # Tool result - if we have pending output, save it first
             if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
-                create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY"
+                create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
                 # Add assistant response to history
                 add_to_history "assistant" "$CURRENT_OUTPUT_TEXT" "" "$CURRENT_TOOL_CALLS"
             fi
@@ -235,12 +243,14 @@ while IFS= read -r line; do
             CURRENT_MODEL=""
             CURRENT_PROMPT_TOKENS=0
             CURRENT_COMPLETION_TOKENS=0
+            CURRENT_CACHE_CREATION_TOKENS=0
+            CURRENT_CACHE_READ_TOKENS=0
             CURRENT_START_TIMESTAMP=""  # Will be set from first assistant message
             CURRENT_END_TIMESTAMP=""
         else
             # Real user message - if we have pending output, save it
             if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
-                create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY"
+                create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
                 # Add assistant response to history
                 add_to_history "assistant" "$CURRENT_OUTPUT_TEXT" "" "$CURRENT_TOOL_CALLS"
             fi
@@ -254,6 +264,8 @@ while IFS= read -r line; do
             CURRENT_MODEL=""
             CURRENT_PROMPT_TOKENS=0
             CURRENT_COMPLETION_TOKENS=0
+            CURRENT_CACHE_CREATION_TOKENS=0
+            CURRENT_CACHE_READ_TOKENS=0
             CURRENT_START_TIMESTAMP="$MSG_TIMESTAMP"
             CURRENT_END_TIMESTAMP=""
         fi
@@ -317,15 +329,20 @@ while IFS= read -r line; do
         if [ "$USAGE" != "{}" ] && [ -n "$USAGE" ]; then
             INPUT_TOKENS=$(echo "$USAGE" | jq -r '.input_tokens // 0' 2>/dev/null)
             OUTPUT_TOKENS=$(echo "$USAGE" | jq -r '.output_tokens // 0' 2>/dev/null)
+            CACHE_CREATION=$(echo "$USAGE" | jq -r '.cache_creation_input_tokens // 0' 2>/dev/null)
+            CACHE_READ=$(echo "$USAGE" | jq -r '.cache_read_input_tokens // 0' 2>/dev/null)
+
             [ "$INPUT_TOKENS" != "null" ] && [ "$INPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_PROMPT_TOKENS=$((CURRENT_PROMPT_TOKENS + INPUT_TOKENS))
             [ "$OUTPUT_TOKENS" != "null" ] && [ "$OUTPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_COMPLETION_TOKENS=$((CURRENT_COMPLETION_TOKENS + OUTPUT_TOKENS))
+            [ "$CACHE_CREATION" != "null" ] && [ "$CACHE_CREATION" -gt 0 ] 2>/dev/null && CURRENT_CACHE_CREATION_TOKENS=$((CURRENT_CACHE_CREATION_TOKENS + CACHE_CREATION))
+            [ "$CACHE_READ" != "null" ] && [ "$CACHE_READ" -gt 0 ] 2>/dev/null && CURRENT_CACHE_READ_TOKENS=$((CURRENT_CACHE_READ_TOKENS + CACHE_READ))
         fi
     fi
 done < "$CONV_FILE"
 
 # Save final LLM call
 if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
-    create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY"
+    create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
 fi
 
 # Update Turn span with end time using merge write
