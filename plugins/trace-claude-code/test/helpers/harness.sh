@@ -30,8 +30,13 @@ HOOKS_DIR="$PLUGIN_DIR/hooks"
 export TEST_HELPERS_DIR TEST_DIR PLUGIN_DIR HOOKS_DIR
 
 # Source the curl stub - defines curl() as a shell function that overrides
-# the binary. Tests can configure responses via $STUB_RESPONSES.
+# the binary. Tests can configure responses via stub_response_for.
 source "$TEST_HELPERS_DIR/curl_stub.sh"
+
+# Source fixture builders and span-tree helpers so tests don't have to
+# source them individually. These are pure helpers; no state.
+source "$TEST_HELPERS_DIR/fixtures.sh"
+source "$TEST_HELPERS_DIR/span_tree.sh"
 
 # Per-test temp dir; reset on every setup_test_env call.
 TEST_TMP=""

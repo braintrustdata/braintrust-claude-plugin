@@ -214,3 +214,11 @@ captured_spans() {
         [ .[] | select(.url | test("/insert$")) | .body.events[]? ]
     ' "$CAPTURED_REQUESTS"
 }
+
+# Export helper functions so subprocesses (hook scripts run via run_hook)
+# inherit them - the stubbed curl() function calls _curl_stub_import on
+# every invocation to rebuild its lookup table from $_CURL_STUB_CONFIG.
+export -f _curl_stub_reset
+export -f _curl_stub_export
+export -f _curl_stub_import
+export -f curl
