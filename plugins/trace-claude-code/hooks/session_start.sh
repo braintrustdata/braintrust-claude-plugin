@@ -36,7 +36,7 @@ if is_experiment_mode; then
     log "INFO" "Tracing to experiment: $CC_EXPERIMENT_ID"
 else
     # Get project ID for project_logs mode
-    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Failed to get project"; exit 0; }
+    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Aborting session_start: could not resolve project '$PROJECT' (see prior error)"; exit 0; }
     debug "Using project: $PROJECT (id: $PROJECT_ID)"
 fi
 

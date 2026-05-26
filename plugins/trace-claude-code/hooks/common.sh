@@ -85,8 +85,21 @@ resolve_api_url() {
         return 0
     fi
 
-    local resp
-    resp=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" "$APP_URL/api/apikey/login" 2>/dev/null) || true
+    local resp http_code
+    resp=$(curl -s -w "\n%{http_code}" -X POST -H "Authorization: Bearer $API_KEY" "$APP_URL/api/apikey/login" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    resp=$(echo "$resp" | sed '$d')
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        log "ERROR" "Braintrust authentication failed (HTTP $http_code) at $APP_URL/api/apikey/login - BRAINTRUST_API_KEY appears to be invalid or expired. Check your API key at $APP_URL/app/settings?subroute=api-keys"
+        # Fall back to default API URL so callers can produce a definitive auth error too
+        echo "https://api.braintrust.dev"
+        return 0
+    fi
+
+    if [ "$http_code" != "200" ]; then
+        log "WARN" "Braintrust login endpoint returned HTTP $http_code at $APP_URL/api/apikey/login: $resp"
+    fi
 
     local api_url
     local org_name="${BRAINTRUST_ORG_NAME:-}"
@@ -151,8 +164,16 @@ get_project_id() {
     # Try to get existing project
     local api_url
     api_url=$(get_api_url)
-    local resp
-    resp=$(curl -sf -H "Authorization: Bearer $API_KEY" "$api_url/v1/project?project_name=$encoded_name" 2>/dev/null) || true
+    local resp http_code
+    resp=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" "$api_url/v1/project?project_name=$encoded_name" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    resp=$(echo "$resp" | sed '$d')
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        log "ERROR" "Braintrust authentication failed (HTTP $http_code) - BRAINTRUST_API_KEY is invalid, expired, or lacks permission. Get a new key at $APP_URL/app/settings?subroute=api-keys and set BRAINTRUST_API_KEY. Response: $resp"
+        return 1
+    fi
+
     local pid
     pid=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
 
@@ -162,10 +183,22 @@ get_project_id() {
         return 0
     fi
 
+    if [ "$http_code" != "200" ] && [ "$http_code" != "404" ]; then
+        log "WARN" "Project lookup returned HTTP $http_code at $api_url/v1/project: $resp"
+    fi
+
     # Create project
     debug "Creating project: $name"
-    resp=$(curl -sf -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-        -d "{\"name\": \"$name\"}" "$api_url/v1/project" 2>/dev/null) || true
+    resp=$(curl -s -w "\n%{http_code}" -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+        -d "{\"name\": \"$name\"}" "$api_url/v1/project" 2>/dev/null)
+    http_code=$(echo "$resp" | tail -1)
+    resp=$(echo "$resp" | sed '$d')
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        log "ERROR" "Braintrust authentication failed (HTTP $http_code) while creating project '$name' - BRAINTRUST_API_KEY is invalid, expired, or lacks permission. Get a new key at $APP_URL/app/settings?subroute=api-keys. Response: $resp"
+        return 1
+    fi
+
     pid=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
 
     if [ -n "$pid" ]; then
@@ -174,6 +207,7 @@ get_project_id() {
         return 0
     fi
 
+    log "ERROR" "Failed to create project '$name' (HTTP $http_code) at $api_url/v1/project: $resp"
     return 1
 }
 

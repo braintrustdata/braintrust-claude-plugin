@@ -36,7 +36,7 @@ fi
 
 # If no session root exists yet, we'll create it
 if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
-    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Failed to get project"; exit 0; }
+    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Aborting user_prompt_submit: could not resolve project '$PROJECT' (see prior error)"; exit 0; }
     ROOT_SPAN_ID="$SESSION_ID"
 
     # Get workspace name from cwd
