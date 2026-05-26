@@ -50,7 +50,8 @@ debug() { is_truthy "$DEBUG" && log "DEBUG" "$1" || true; }
 
 get_cache_value() {
     local key="$1"
-    [ -f "$CACHE_FILE" ] && cat "$CACHE_FILE" | jq -r ".$key // empty" 2>/dev/null || echo ""
+    # Use --arg + bracket lookup so keys containing dashes/dots/etc work
+    [ -f "$CACHE_FILE" ] && jq -r --arg k "$key" '.[$k] // empty' "$CACHE_FILE" 2>/dev/null || echo ""
 }
 
 set_cache_value() {
@@ -294,7 +295,8 @@ get_session_state() {
     local key="$2"
     local state_file
     state_file=$(get_session_state_file "$session_id")
-    [ -f "$state_file" ] && cat "$state_file" | jq -r ".$key // empty" 2>/dev/null || echo ""
+    # Use --arg + bracket lookup so keys containing dashes/dots/etc work
+    [ -f "$state_file" ] && jq -r --arg k "$key" '.[$k] // empty' "$state_file" 2>/dev/null || echo ""
 }
 
 # Set a value in session state
