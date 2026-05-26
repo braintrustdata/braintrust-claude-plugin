@@ -37,6 +37,7 @@ source "$TEST_HELPERS_DIR/curl_stub.sh"
 # source them individually. These are pure helpers; no state.
 source "$TEST_HELPERS_DIR/fixtures.sh"
 source "$TEST_HELPERS_DIR/span_tree.sh"
+source "$TEST_HELPERS_DIR/replay.sh"
 
 # Per-test temp dir; reset on every setup_test_env call.
 TEST_TMP=""
@@ -52,6 +53,12 @@ setup_test_env() {
     export BRAINTRUST_API_URL="https://api.test.invalid"
     export TRACE_TO_BRAINTRUST=true
     export DEBUG=false
+    # Run the span queue inline so tests are deterministic - we don't
+    # want to spawn background workers or wait on file watchers.
+    export BRAINTRUST_SYNC_QUEUE=true
+    # If a test opts into async mode and a worker is left behind, make
+    # sure drain_queue calls don't block tests for the full default.
+    export BRAINTRUST_DRAIN_TIMEOUT=5
 
     # Capture file for HTTP requests
     export CAPTURED_REQUESTS="$TEST_TMP/captured_requests.ndjson"

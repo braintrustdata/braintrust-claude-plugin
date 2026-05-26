@@ -15,6 +15,7 @@ check_requirements || exit 0
 
 # Read input from stdin
 INPUT=$(cat)
+record_hook_input "post_tool_use" "$INPUT"
 debug "PostToolUse input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Extract tool info
@@ -111,7 +112,7 @@ EVENT=$(jq -n \
         }
     }')
 
-ROW_ID=$(insert_span "$PROJECT_ID" "$EVENT") || { log "ERROR" "Failed to create tool span"; exit 0; }
+enqueue_span "$SESSION_ID" "$PROJECT_ID" "$EVENT" || { log "ERROR" "Failed to enqueue tool span"; exit 0; }
 
 log "INFO" "Tool: $SPAN_NAME (turn=$TURN_SPAN_ID)"
 

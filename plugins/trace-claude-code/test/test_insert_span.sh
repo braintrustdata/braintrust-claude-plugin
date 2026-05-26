@@ -1,6 +1,6 @@
 #!/bin/bash
 ###
-# Tests for insert_span() and get_project_id() HTTP status handling.
+# Tests for _http_insert_span() and get_project_id() HTTP status handling.
 #
 # Exercises the curl_stub by configuring canned responses and asserting on
 # the captured requests and the function's stdout/exit codes.
@@ -27,7 +27,7 @@ _test_event() {
 }
 
 # ---------------------------------------------------------------------------
-describe "insert_span: success"
+describe "_http_insert_span: success"
 # ---------------------------------------------------------------------------
 
 t_insert_success_returns_row_id() {
@@ -35,7 +35,7 @@ t_insert_success_returns_row_id() {
 
     local event row_id rc
     event=$(_test_event)
-    row_id=$(insert_span "proj_123" "$event")
+    row_id=$(_http_insert_span "proj_123" "$event")
     rc=$?
 
     assert_success "$rc"
@@ -51,7 +51,7 @@ t_insert_request_body_shape() {
 
     local event
     event=$(_test_event)
-    insert_span "proj_456" "$event" >/dev/null
+    _http_insert_span "proj_456" "$event" >/dev/null
 
     local body_events_len
     body_events_len=$(jq -s '.[0].body.events | length' "$CAPTURED_REQUESTS")
@@ -66,7 +66,7 @@ it "POSTs to the project_logs insert endpoint and returns the row id" t_insert_s
 it "includes the event in the request body wrapped under .events"     t_insert_request_body_shape
 
 # ---------------------------------------------------------------------------
-describe "insert_span: failure modes"
+describe "_http_insert_span: failure modes"
 # ---------------------------------------------------------------------------
 
 t_insert_401() {
@@ -74,7 +74,7 @@ t_insert_401() {
 
     local event rc
     event=$(_test_event)
-    insert_span "proj_123" "$event" >/dev/null
+    _http_insert_span "proj_123" "$event" >/dev/null
     rc=$?
 
     assert_failure "$rc"
@@ -88,7 +88,7 @@ t_insert_500() {
 
     local event rc
     event=$(_test_event)
-    insert_span "proj_123" "$event" >/dev/null
+    _http_insert_span "proj_123" "$event" >/dev/null
     rc=$?
 
     assert_failure "$rc"
@@ -102,7 +102,7 @@ t_insert_no_api_key() {
 
     local event rc
     event=$(_test_event)
-    insert_span "proj_123" "$event" >/dev/null
+    _http_insert_span "proj_123" "$event" >/dev/null
     rc=$?
 
     assert_failure "$rc"
@@ -116,7 +116,7 @@ t_insert_empty_row_ids() {
 
     local event rc
     event=$(_test_event)
-    insert_span "proj_123" "$event" >/dev/null
+    _http_insert_span "proj_123" "$event" >/dev/null
     rc=$?
 
     assert_failure "$rc"
@@ -128,7 +128,7 @@ it "returns non-zero when API_KEY is empty"         t_insert_no_api_key
 it "returns non-zero when the response has no row_ids" t_insert_empty_row_ids
 
 # ---------------------------------------------------------------------------
-describe "insert_span: experiment mode"
+describe "_http_insert_span: experiment mode"
 # ---------------------------------------------------------------------------
 
 t_insert_experiment_mode() {
@@ -138,7 +138,7 @@ t_insert_experiment_mode() {
 
     local event row_id rc
     event=$(_test_event)
-    row_id=$(insert_span "proj_irrelevant" "$event")
+    row_id=$(_http_insert_span "proj_irrelevant" "$event")
     rc=$?
 
     assert_success "$rc"
@@ -229,8 +229,34 @@ t_get_project_403() {
     assert_contains "$log" "authentication failed"
 }
 
+t_get_project_create_escapes_special_chars() {
+    # Project names can contain characters that would break a hand-rolled
+    # JSON literal: double quotes, backslashes, newlines. The create body
+    # must escape these correctly via jq.
+    stub_response_for "*/v1/project?project_name=*" 200 '{}'
+    stub_response_for "*/v1/project" 200 '{"id":"proj_created"}'
+
+    local weird_name='my "quoted" \backslash project'
+    local pid rc
+    pid=$(get_project_id "$weird_name")
+    rc=$?
+
+    assert_success "$rc"
+    assert_eq "$pid" "proj_created"
+
+    # The POST body must be parseable JSON and the name field must round
+    # trip cleanly (including the embedded quotes and backslash).
+    local sent_name
+    sent_name=$(jq -s --arg url "/v1/project" -r '
+        [.[] | select(.method == "POST") | select(.url | endswith($url))]
+        | .[-1].body.name
+    ' "$CAPTURED_REQUESTS")
+    assert_eq "$sent_name" "$weird_name"
+}
+
 it "returns the existing project id on successful lookup"             t_get_project_existing
 it "creates a new project when lookup returns no id"                  t_get_project_create
+it "escapes special characters in the project create body"            t_get_project_create_escapes_special_chars
 it "caches the project id so the second call makes no HTTP request"   t_get_project_cached
 it "returns non-zero and logs an auth error on HTTP 401"              t_get_project_401
 it "returns non-zero and logs an auth error on HTTP 403"              t_get_project_403

@@ -33,10 +33,15 @@ span_count_by_type() {
 }
 
 # Return spans whose span_attributes.name matches the given regex.
+# Spans without a name (e.g. merge updates that only touch metrics) are
+# excluded.
 spans_named() {
     local pattern="$1"
     all_spans | jq --arg p "$pattern" '
-        [ .[] | select(.span_attributes.name | test($p)) ]
+        [ .[]
+          | select(.span_attributes.name != null)
+          | select(.span_attributes.name | test($p))
+        ]
     '
 }
 

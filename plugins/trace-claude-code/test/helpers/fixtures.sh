@@ -52,16 +52,19 @@ fixture_post_tool_use() {
         '{session_id: $s, tool_name: $t, tool_input: $i, tool_response: $r}'
 }
 
-# Stop payload - includes the transcript path
+# Stop payload - includes the transcript path and optionally the
+# last assistant message that Claude Code provides in real Stop events.
 #
-# Args: session_id transcript_path
+# Args: session_id transcript_path [last_assistant_message]
 fixture_stop() {
     local session_id="$1"
     local transcript_path="$2"
+    local last_msg="${3:-}"
     jq -nc \
         --arg s "$session_id" \
         --arg t "$transcript_path" \
-        '{session_id: $s, transcript_path: $t}'
+        --arg m "$last_msg" \
+        '{session_id: $s, transcript_path: $t, last_assistant_message: $m}'
 }
 
 # SessionEnd payload
