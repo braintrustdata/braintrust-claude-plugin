@@ -24,7 +24,7 @@ _setup_default_stubs() {
 }
 
 # ---------------------------------------------------------------------------
-describe "e2e: simple session with one turn and two tools"
+describe "full pipeline: simple session with one turn and two tools"
 # ---------------------------------------------------------------------------
 
 t_e2e_simple_session() {
@@ -144,7 +144,7 @@ it "spans form correct session > turn > tool hierarchy" t_e2e_span_hierarchy
 it "multiple turns produce correctly-parented spans"    t_e2e_multi_turn
 
 # ---------------------------------------------------------------------------
-describe "e2e: no tool spans dropped under sequential PostToolUse"
+describe "full pipeline: no tool spans dropped under sequential PostToolUse"
 # ---------------------------------------------------------------------------
 
 # This is the regression test for the missing-spans class of bugs. We fire
