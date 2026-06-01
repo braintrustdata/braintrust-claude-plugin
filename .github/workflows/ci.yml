@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  trace-claude-code:
+    name: trace-claude-code bash tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # jq, curl, uuid-runtime (uuidgen), python3 are all preinstalled on
+      # ubuntu. Confirm they're available so failures are obvious.
+      - name: Verify test dependencies
+        run: |
+          set -e
+          echo "bash:    $(bash --version | head -1)"
+          echo "jq:      $(jq --version)"
+          echo "curl:    $(curl --version | head -1)"
+          echo "uuidgen: $(uuidgen)"
+          echo "python3: $(python3 --version)"
+
+      - name: Run trace-claude-code tests
+        run: make test
+        env:
+          # Force non-color output so logs in GitHub Actions are readable.
+          NO_COLOR: "1"
+
+      - name: Show hook log on failure
+        if: failure()
+        run: |
+          if [ -f "$HOME/.claude/state/braintrust_hook.log" ]; then
+            echo "=== hook log ==="
+            cat "$HOME/.claude/state/braintrust_hook.log"
+          fi

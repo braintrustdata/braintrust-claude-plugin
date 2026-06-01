@@ -16,6 +16,7 @@ check_requirements || exit 0
 
 # Read input from stdin
 INPUT=$(cat)
+record_hook_input "session_start" "$INPUT"
 debug "SessionStart input: $INPUT"
 
 # Extract session ID from input
@@ -27,6 +28,12 @@ if [ -z "$SESSION_ID" ]; then
     debug "Generated session ID: $SESSION_ID"
 fi
 
+# Clean up any queue dirs left behind by previous Claude Code sessions
+# that crashed (no SessionEnd hook fired). Sweeps any dir whose worker
+# lock is stale or missing-with-leftover-jobs, recovering or removing
+# as appropriate. Skips our own session's dir.
+sweep_dead_sessions "$SESSION_ID"
+
 # Determine mode and get appropriate IDs
 if is_experiment_mode; then
     debug "Experiment mode: CC_EXPERIMENT_ID=$CC_EXPERIMENT_ID"
@@ -36,7 +43,7 @@ if is_experiment_mode; then
     log "INFO" "Tracing to experiment: $CC_EXPERIMENT_ID"
 else
     # Get project ID for project_logs mode
-    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Failed to get project"; exit 0; }
+    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Aborting session_start: could not resolve project '$PROJECT' (see prior error)"; exit 0; }
     debug "Using project: $PROJECT (id: $PROJECT_ID)"
 fi
 
@@ -106,7 +113,7 @@ if [ -n "$CC_PARENT_SPAN_ID" ]; then
     EVENT=$(echo "$EVENT" | jq --arg parent "$CC_PARENT_SPAN_ID" '. + {span_parents: [$parent]}')
 fi
 
-ROW_ID=$(insert_span "$PROJECT_ID" "$EVENT") || { log "ERROR" "Failed to create session root"; exit 0; }
+enqueue_span "$SESSION_ID" "$PROJECT_ID" "$EVENT" || { log "ERROR" "Failed to enqueue session root span"; exit 0; }
 
 # Save remaining session state (root_span_id was already set atomically above)
 set_session_state "$SESSION_ID" "session_span_id" "$SPAN_ID"

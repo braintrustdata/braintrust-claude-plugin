@@ -27,6 +27,7 @@ check_requirements || exit 0
 
 # Read input from stdin
 INPUT=$(cat)
+record_hook_input "stop_hook" "$INPUT"
 debug "Stop input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Get session ID
@@ -40,6 +41,11 @@ if [ -z "$SESSION_ID" ]; then
 fi
 
 [ -z "$SESSION_ID" ] && { debug "No session ID"; exit 0; }
+
+# The Stop event includes Claude's final assistant message directly in the
+# payload, so we don't have to reconstruct it from the transcript.
+# (See https://docs.claude.com/en/docs/claude-code/hooks -> Stop input)
+LAST_ASSISTANT_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
 
 # Get session state
 ROOT_SPAN_ID=$(get_session_state "$SESSION_ID" "root_span_id")
@@ -88,6 +94,15 @@ CURRENT_CACHE_READ_TOKENS=0
 CURRENT_START_TIMESTAMP=""  # ISO timestamp when this LLM call started
 CURRENT_END_TIMESTAMP=""    # ISO timestamp when this LLM call ended
 LINE_NUM=0
+
+# Turn-level token aggregates. We sum each LLM call's token counts so the
+# Turn span's metrics reflect the total cost of the turn. The Turn's
+# `output` field is set separately from $LAST_ASSISTANT_MESSAGE (read from
+# the hook input below), not from this transcript-parsing loop.
+TURN_TOTAL_PROMPT_TOKENS=0
+TURN_TOTAL_COMPLETION_TOKENS=0
+TURN_TOTAL_CACHE_CREATION_TOKENS=0
+TURN_TOTAL_CACHE_READ_TOKENS=0
 
 # Accumulated conversation history (JSON array of messages)
 CONVERSATION_HISTORY="[]"
@@ -202,10 +217,17 @@ create_llm_span() {
             }
         }')
 
-    insert_span "$PROJECT_ID" "$event" >/dev/null && {
+    if enqueue_span "$SESSION_ID" "$PROJECT_ID" "$event"; then
         LLM_CALLS_CREATED=$((LLM_CALLS_CREATED + 1))
         log "INFO" "LLM span: $model tokens=$total_tokens (turn=$TURN_SPAN_ID)"
-    } || true
+    fi
+
+    # Aggregate token counts so the Turn span's metrics reflect the full
+    # turn's cost (sum across all LLM calls).
+    TURN_TOTAL_PROMPT_TOKENS=$((TURN_TOTAL_PROMPT_TOKENS + prompt_tokens))
+    TURN_TOTAL_COMPLETION_TOKENS=$((TURN_TOTAL_COMPLETION_TOKENS + completion_tokens))
+    TURN_TOTAL_CACHE_CREATION_TOKENS=$((TURN_TOTAL_CACHE_CREATION_TOKENS + cache_creation_tokens))
+    TURN_TOTAL_CACHE_READ_TOKENS=$((TURN_TOTAL_CACHE_READ_TOKENS + cache_read_tokens))
 }
 
 while IFS= read -r line; do
@@ -345,21 +367,36 @@ if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
     create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
 fi
 
-# Update Turn span with end time using merge write
+# Update Turn span with end time, Claude's final response, and aggregated
+# token counts using a merge write. The merge keeps the existing fields
+# (input, name, type) set when user_prompt_submit.sh created the Turn span.
 END_TIME=$(date +%s)
+TURN_TOTAL_TOKENS=$((TURN_TOTAL_PROMPT_TOKENS + TURN_TOTAL_COMPLETION_TOKENS))
 
 TURN_UPDATE=$(jq -n \
     --arg id "$TURN_SPAN_ID" \
+    --arg output "$LAST_ASSISTANT_MESSAGE" \
     --argjson end_time "$END_TIME" \
+    --argjson prompt_tokens "$TURN_TOTAL_PROMPT_TOKENS" \
+    --argjson completion_tokens "$TURN_TOTAL_COMPLETION_TOKENS" \
+    --argjson total_tokens "$TURN_TOTAL_TOKENS" \
+    --argjson cache_creation_tokens "$TURN_TOTAL_CACHE_CREATION_TOKENS" \
+    --argjson cache_read_tokens "$TURN_TOTAL_CACHE_READ_TOKENS" \
     '{
         id: $id,
         _is_merge: true,
+        output: $output,
         metrics: {
-            end: $end_time
+            end: $end_time,
+            prompt_tokens: $prompt_tokens,
+            completion_tokens: $completion_tokens,
+            tokens: $total_tokens,
+            cache_creation_input_tokens: $cache_creation_tokens,
+            cache_read_input_tokens: $cache_read_tokens
         }
     }')
 
-insert_span "$PROJECT_ID" "$TURN_UPDATE" >/dev/null || true
+enqueue_span "$SESSION_ID" "$PROJECT_ID" "$TURN_UPDATE" || true
 
 # Update state
 set_session_state "$SESSION_ID" "turn_last_line" "$TOTAL_LINES"

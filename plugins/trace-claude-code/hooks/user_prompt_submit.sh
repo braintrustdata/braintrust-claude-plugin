@@ -15,6 +15,7 @@ check_requirements || exit 0
 
 # Read input from stdin
 INPUT=$(cat)
+record_hook_input "user_prompt_submit" "$INPUT"
 debug "UserPromptSubmit input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Extract session ID and prompt
@@ -36,7 +37,7 @@ fi
 
 # If no session root exists yet, we'll create it
 if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
-    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Failed to get project"; exit 0; }
+    PROJECT_ID=$(get_project_id "$PROJECT") || { log "ERROR" "Aborting user_prompt_submit: could not resolve project '$PROJECT' (see prior error)"; exit 0; }
     ROOT_SPAN_ID="$SESSION_ID"
 
     # Get workspace name from cwd
@@ -78,7 +79,7 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
             }
         }')
 
-    insert_span "$PROJECT_ID" "$EVENT" >/dev/null || true
+    enqueue_span "$SESSION_ID" "$PROJECT_ID" "$EVENT" || true
     set_session_state "$SESSION_ID" "root_span_id" "$ROOT_SPAN_ID"
     set_session_state "$SESSION_ID" "session_span_id" "$ROOT_SPAN_ID"
     set_session_state "$SESSION_ID" "project_id" "$PROJECT_ID"
@@ -125,7 +126,7 @@ EVENT=$(jq -n \
         }
     }')
 
-ROW_ID=$(insert_span "$PROJECT_ID" "$EVENT") || { log "ERROR" "Failed to create turn span"; exit 0; }
+enqueue_span "$SESSION_ID" "$PROJECT_ID" "$EVENT" || { log "ERROR" "Failed to enqueue turn span"; exit 0; }
 
 # Save turn state
 set_session_state "$SESSION_ID" "turn_count" "$TURN_COUNT"
