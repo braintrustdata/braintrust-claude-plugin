@@ -217,10 +217,30 @@ The captured HTTP requests are parsed to extract the inserted spans. Available h
 
 All return JSON on stdout; combine with `jq` for further drilling.
 
-# Updating the plugin
+# Releasing a plugin
 
-After making changes:
+Releases are manual and git-driven. There are no git tags or publish automation: pushing to `main` is the release.
 
-1. Bump version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
-2. Commit and push
-3. Users update with: `claude plugin marketplace update braintrust-claude-plugin`
+## How version resolution works
+
+Claude Code resolves a plugin's version from the first of these that is set:
+
+1. `version` in the plugin's `plugins/<plugin>/.claude-plugin/plugin.json`
+2. `version` in the plugin's entry in `.claude-plugin/marketplace.json`
+3. The git commit SHA of the plugin's source
+
+Both plugins set `version` in their own `plugin.json`, and the marketplace entries do **not** declare a per-plugin `version`. So **each plugin's `plugin.json` is the sole authority for its version**, and bumping it is what triggers updates for users.
+
+The top-level `version` field in `marketplace.json` is just marketplace-manifest metadata. It does **not** gate plugin updates.
+
+> [!WARNING]
+> Do not add a `version` field to a plugin's entry in `marketplace.json`. The `plugin.json` value always wins silently, so a stale marketplace version can mask the real one. Keep the version in `plugin.json` only.
+
+## Release steps
+
+1. Bump `version` in the plugin's manifest:
+   - `plugins/braintrust/.claude-plugin/plugin.json`, or
+   - `plugins/trace-claude-code/.claude-plugin/plugin.json`
+2. (Optional) Bump the top-level `version` in `.claude-plugin/marketplace.json` for bookkeeping. This is cosmetic and does not affect whether users receive the update.
+3. Commit and push to `main` (via PR).
+4. Users update with: `claude plugin marketplace update braintrust-claude-plugin`
