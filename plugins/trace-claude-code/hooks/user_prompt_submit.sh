@@ -49,6 +49,11 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
     USERNAME=$(get_username)
     OS=$(get_os)
 
+    # Version info for observability (mirrors session_start.sh).
+    TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+    PLUGIN_VERSION=$(get_plugin_version)
+    CLAUDE_CODE_VERSION=$(get_claude_code_version "$TRANSCRIPT_PATH")
+
     EVENT=$(jq -n \
         --arg id "$ROOT_SPAN_ID" \
         --arg span_id "$ROOT_SPAN_ID" \
@@ -59,6 +64,8 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
         --arg hostname "$HOSTNAME" \
         --arg username "$USERNAME" \
         --arg os "$OS" \
+        --arg plugin_version "$PLUGIN_VERSION" \
+        --arg claude_code_version "$CLAUDE_CODE_VERSION" \
         '{
             id: $id,
             span_id: $span_id,
@@ -71,7 +78,9 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
                 hostname: $hostname,
                 username: $username,
                 os: $os,
-                source: "claude-code"
+                source: "claude-code",
+                trace_claude_code_version: $plugin_version,
+                claude_code_version: $claude_code_version
             },
             span_attributes: {
                 name: ("Claude Code: " + $workspace),

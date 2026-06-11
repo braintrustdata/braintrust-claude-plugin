@@ -890,6 +890,44 @@ get_os() {
     uname -s 2>/dev/null || echo "unknown"
 }
 
+# Version of this plugin, read from its plugin.json manifest. Cached after the
+# first lookup. Returns "unknown" if it can't be read.
+get_plugin_version() {
+    if [ -n "${_PLUGIN_VERSION:-}" ]; then
+        echo "$_PLUGIN_VERSION"
+        return
+    fi
+    local manifest="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/../.claude-plugin/plugin.json"
+    local v=""
+    [ -f "$manifest" ] && v=$(jq -r '.version // empty' "$manifest" 2>/dev/null)
+    _PLUGIN_VERSION="${v:-unknown}"
+    echo "$_PLUGIN_VERSION"
+}
+
+# Version of the running Claude Code CLI. Prefers a version found in the
+# session transcript (authoritative for the run that produced it); falls back
+# to `claude --version`. Cached after the first lookup. Returns "unknown" if
+# neither source is available.
+#
+# Args: [transcript_path] - optional transcript to read `.version` from.
+get_claude_code_version() {
+    local transcript="${1:-}"
+    if [ -n "${_CC_VERSION:-}" ]; then
+        echo "$_CC_VERSION"
+        return
+    fi
+    local v=""
+    if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+        v=$(jq -rc 'select(.version) | .version' "$transcript" 2>/dev/null | head -1)
+    fi
+    if [ -z "$v" ]; then
+        # e.g. "2.1.173 (Claude Code)" -> "2.1.173"
+        v=$(claude --version 2>/dev/null | awk '{print $1}')
+    fi
+    _CC_VERSION="${v:-unknown}"
+    echo "$_CC_VERSION"
+}
+
 ###
 # Emit spans for a Claude Code transcript file (typically a sub-agent's own
 # transcript), parented under a given span. This reproduces the same span
