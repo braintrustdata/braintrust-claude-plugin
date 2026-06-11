@@ -95,6 +95,15 @@ CURRENT_START_TIMESTAMP=""  # ISO timestamp when this LLM call started
 CURRENT_END_TIMESTAMP=""    # ISO timestamp when this LLM call ended
 LINE_NUM=0
 
+# Claude Code writes one transcript line per content block (thinking, text,
+# each tool_use) and every line belonging to the same API response repeats the
+# identical `usage` block, tagged with the same `requestId`. A single response
+# can also straddle a tool_result boundary (the same requestId reappears after
+# tool output). To avoid multiplying a single response's tokens by its
+# content-block count, we count each requestId's usage exactly once across the
+# whole turn. This holds the space-separated set of requestIds already counted.
+SEEN_REQUEST_IDS=" "
+
 # Turn-level token aggregates. We sum each LLM call's token counts so the
 # Turn span's metrics reflect the total cost of the turn. The Turn's
 # `output` field is set separately from $LAST_ASSISTANT_MESSAGE (read from
@@ -346,9 +355,21 @@ while IFS= read -r line; do
         MODEL=$(echo "$line" | jq -r '.message.model // empty' 2>/dev/null)
         [ -n "$MODEL" ] && CURRENT_MODEL="$MODEL"
 
-        # Extract tokens
+        # Extract tokens. Dedupe by requestId so a single API response whose
+        # usage is repeated across multiple content-block lines is counted
+        # once. Lines without a requestId (rare) fall back to the message id;
+        # if neither is present we count the usage as-is.
+        REQUEST_ID=$(echo "$line" | jq -r '.requestId // .message.id // empty' 2>/dev/null)
+        ALREADY_COUNTED=false
+        if [ -n "$REQUEST_ID" ]; then
+            case "$SEEN_REQUEST_IDS" in
+                *" $REQUEST_ID "*) ALREADY_COUNTED=true ;;
+                *) SEEN_REQUEST_IDS="${SEEN_REQUEST_IDS}${REQUEST_ID} " ;;
+            esac
+        fi
+
         USAGE=$(echo "$line" | jq -c '.message.usage // {}' 2>/dev/null)
-        if [ "$USAGE" != "{}" ] && [ -n "$USAGE" ]; then
+        if [ "$ALREADY_COUNTED" = "false" ] && [ "$USAGE" != "{}" ] && [ -n "$USAGE" ]; then
             INPUT_TOKENS=$(echo "$USAGE" | jq -r '.input_tokens // 0' 2>/dev/null)
             OUTPUT_TOKENS=$(echo "$USAGE" | jq -r '.output_tokens // 0' 2>/dev/null)
             CACHE_CREATION=$(echo "$USAGE" | jq -r '.cache_creation_input_tokens // 0' 2>/dev/null)

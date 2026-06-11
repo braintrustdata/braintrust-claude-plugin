@@ -222,3 +222,59 @@ t_llm_content() {
 }
 
 it "LLM spans use claude-opus-4-7 and have sensible token metrics" t_llm_content
+
+# ---------------------------------------------------------------------------
+describe "test-fixture: token totals dedupe by requestId"
+# ---------------------------------------------------------------------------
+
+# Regression test for the double-counting bug: Claude Code writes one
+# transcript line per content block (thinking, text, each tool_use) and
+# every line for the same API response repeats the identical `usage` block,
+# tagged with the same `requestId`. The stop_hook must count each response's
+# usage exactly once, not once per content-block line.
+#
+# The fixture transcript has 30 assistant lines but only 7 unique
+# requestIds. The expected totals below are the sum of each unique
+# requestId's usage (computed via:
+#   jq -s '[.[]|select(.type=="assistant")
+#           | {rid:.requestId, inp:.message.usage.input_tokens,
+#              out:.message.usage.output_tokens,
+#              cc:.message.usage.cache_creation_input_tokens,
+#              cr:.message.usage.cache_read_input_tokens}]
+#          | unique_by(.rid)
+#          | {inp:(map(.inp)|add), out:(map(.out)|add),
+#             cc:(map(.cc)|add), cr:(map(.cr)|add)}' transcript.jsonl
+# ).
+#
+# Turn-level metrics live on the per-Turn merge updates. Summing them
+# across all 4 turns gives the whole-session totals, which must match the
+# deduped expectation. Before the fix, output alone would be 425*4 + ... +
+# 745*8 + ... = thousands too high.
+t_token_dedupe_totals() {
+    _setup_default_stubs
+    replay_session "$FIXTURE_DIR" >/dev/null
+
+    # Sum metrics across the 4 Turn merge updates.
+    local merges
+    merges=$(all_spans | jq '[.[] | select(._is_merge == true)]')
+
+    local total_prompt total_completion total_cache_creation total_cache_read
+    total_prompt=$(echo "$merges" | jq '[.[].metrics.prompt_tokens // 0] | add')
+    total_completion=$(echo "$merges" | jq '[.[].metrics.completion_tokens // 0] | add')
+    total_cache_creation=$(echo "$merges" | jq '[.[].metrics.cache_creation_input_tokens // 0] | add')
+    total_cache_read=$(echo "$merges" | jq '[.[].metrics.cache_read_input_tokens // 0] | add')
+
+    # Expected = sum of usage over the 7 unique requestIds in the transcript.
+    assert_eq "$total_prompt"         "368"    "prompt_tokens should dedupe by requestId"
+    assert_eq "$total_completion"     "1867"   "completion_tokens should dedupe by requestId"
+    assert_eq "$total_cache_creation" "21064"  "cache_creation_input_tokens should dedupe by requestId"
+    assert_eq "$total_cache_read"     "165784" "cache_read_input_tokens should dedupe by requestId"
+
+    # tokens = prompt + completion on each merge; verify the aggregate too.
+    local total_tokens
+    total_tokens=$(echo "$merges" | jq '[.[].metrics.tokens // 0] | add')
+    assert_eq "$total_tokens" "2235" "tokens should equal prompt+completion deduped"
+}
+
+it "turn token totals count each requestId once (no per-content-block double-count)" \
+    t_token_dedupe_totals
