@@ -19,7 +19,7 @@ export BRAINTRUST_SYNC_QUEUE="${BRAINTRUST_SYNC_QUEUE:-false}"
 
 # How long drain_queue will wait (seconds) before giving up. Hooks must
 # never block Claude Code forever.
-export BRAINTRUST_DRAIN_TIMEOUT="${BRAINTRUST_DRAIN_TIMEOUT:-30}"
+export BRAINTRUST_DRAIN_TIMEOUT="${BRAINTRUST_DRAIN_TIMEOUT:-60}"
 
 # How long the worker.lock mtime can be stale (seconds) before a session
 # is considered crashed and its queue dir is swept on the next
