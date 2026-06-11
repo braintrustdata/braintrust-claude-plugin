@@ -113,14 +113,11 @@ LINE_NUM=0
 SEEN_REQUEST_IDS=" "
 REQUEST_OUTPUT_MAX=" "
 
-# Turn-level token aggregates. We sum each LLM call's token counts so the
-# Turn span's metrics reflect the total cost of the turn. The Turn's
-# `output` field is set separately from $LAST_ASSISTANT_MESSAGE (read from
-# the hook input below), not from this transcript-parsing loop.
-TURN_TOTAL_PROMPT_TOKENS=0
-TURN_TOTAL_COMPLETION_TOKENS=0
-TURN_TOTAL_CACHE_CREATION_TOKENS=0
-TURN_TOTAL_CACHE_READ_TOKENS=0
+# Note: we deliberately do NOT write aggregate token metrics onto the Turn
+# span. Token metrics live only on the leaf LLM spans (main-conversation and
+# sub-agent), and Braintrust rolls those up to parent spans for display.
+# Writing our own Turn-level sums here would be both redundant and incomplete
+# (it would miss sub-agent tokens, which are emitted outside this loop).
 
 # Accumulated conversation history (JSON array of messages)
 CONVERSATION_HISTORY="[]"
@@ -239,13 +236,6 @@ create_llm_span() {
         LLM_CALLS_CREATED=$((LLM_CALLS_CREATED + 1))
         log "INFO" "LLM span: $model tokens=$total_tokens (turn=$TURN_SPAN_ID)"
     fi
-
-    # Aggregate token counts so the Turn span's metrics reflect the full
-    # turn's cost (sum across all LLM calls).
-    TURN_TOTAL_PROMPT_TOKENS=$((TURN_TOTAL_PROMPT_TOKENS + prompt_tokens))
-    TURN_TOTAL_COMPLETION_TOKENS=$((TURN_TOTAL_COMPLETION_TOKENS + completion_tokens))
-    TURN_TOTAL_CACHE_CREATION_TOKENS=$((TURN_TOTAL_CACHE_CREATION_TOKENS + cache_creation_tokens))
-    TURN_TOTAL_CACHE_READ_TOKENS=$((TURN_TOTAL_CACHE_READ_TOKENS + cache_read_tokens))
 }
 
 while IFS= read -r line; do
@@ -428,32 +418,23 @@ if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
     create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
 fi
 
-# Update Turn span with end time, Claude's final response, and aggregated
-# token counts using a merge write. The merge keeps the existing fields
-# (input, name, type) set when user_prompt_submit.sh created the Turn span.
+# Update the Turn span with its end time and Claude's final response via a
+# merge write. The merge keeps the existing fields (input, name, type) set
+# when user_prompt_submit.sh created the Turn span. We intentionally do NOT
+# write token metrics here: token metrics live only on the leaf LLM spans,
+# and Braintrust aggregates them onto parents (Turn, session) for display.
 END_TIME=$(date +%s)
-TURN_TOTAL_TOKENS=$((TURN_TOTAL_PROMPT_TOKENS + TURN_TOTAL_COMPLETION_TOKENS))
 
 TURN_UPDATE=$(jq -n \
     --arg id "$TURN_SPAN_ID" \
     --arg output "$LAST_ASSISTANT_MESSAGE" \
     --argjson end_time "$END_TIME" \
-    --argjson prompt_tokens "$TURN_TOTAL_PROMPT_TOKENS" \
-    --argjson completion_tokens "$TURN_TOTAL_COMPLETION_TOKENS" \
-    --argjson total_tokens "$TURN_TOTAL_TOKENS" \
-    --argjson cache_creation_tokens "$TURN_TOTAL_CACHE_CREATION_TOKENS" \
-    --argjson cache_read_tokens "$TURN_TOTAL_CACHE_READ_TOKENS" \
     '{
         id: $id,
         _is_merge: true,
         output: $output,
         metrics: {
-            end: $end_time,
-            prompt_tokens: $prompt_tokens,
-            completion_tokens: $completion_tokens,
-            tokens: $total_tokens,
-            cache_creation_input_tokens: $cache_creation_tokens,
-            cache_read_input_tokens: $cache_read_tokens
+            end: $end_time
         }
     }')
 

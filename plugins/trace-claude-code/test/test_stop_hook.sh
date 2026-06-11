@@ -117,9 +117,11 @@ t_stop_merge_flag_is_set() {
     assert_eq "$merges" "1"
 }
 
-t_stop_includes_metrics_in_merge() {
-    # Even with an empty transcript (no LLM calls), the merge should
-    # carry zero-valued token totals so the schema is consistent.
+t_stop_merge_has_end_time_no_tokens() {
+    # The Turn merge should carry an end time but NO token metrics: token
+    # metrics live only on the leaf LLM spans, and Braintrust aggregates
+    # them onto parent spans for display. Writing Turn-level token sums here
+    # would be redundant and would miss sub-agent tokens.
     _with_turn_started "stop-metrics-1"
     local transcript
     transcript=$(_empty_transcript "$TEST_TMP/transcript.jsonl")
@@ -128,23 +130,22 @@ t_stop_includes_metrics_in_merge() {
     local span
     span=$(all_spans | jq '.[] | select(._is_merge == true)' | jq -s '.[0]')
 
-    local end_time prompt_tokens completion_tokens tokens
-    end_time=$(echo "$span" | jq -r '.metrics.end')
-    prompt_tokens=$(echo "$span" | jq -r '.metrics.prompt_tokens')
-    completion_tokens=$(echo "$span" | jq -r '.metrics.completion_tokens')
-    tokens=$(echo "$span" | jq -r '.metrics.tokens')
-
     # end is a unix timestamp - should be a positive integer
+    local end_time
+    end_time=$(echo "$span" | jq -r '.metrics.end')
     if [ "$end_time" -le 0 ] 2>/dev/null; then
         fail "expected positive end time, got $end_time"
     fi
-    assert_eq "$prompt_tokens" "0"
-    assert_eq "$completion_tokens" "0"
-    assert_eq "$tokens" "0"
+
+    # No token metrics should be present on the merge.
+    assert_eq "$(echo "$span" | jq -r '.metrics.prompt_tokens // "absent"')"     "absent" "no prompt_tokens on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.completion_tokens // "absent"')" "absent" "no completion_tokens on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.tokens // "absent"')"            "absent" "no tokens on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.cache_read_input_tokens // "absent"')" "absent" "no cache_read on Turn merge"
 }
 
 it "writes last_assistant_message into the Turn span output"  t_stop_sets_turn_output
 it "leaves output empty when last_assistant_message missing"  t_stop_output_empty_when_message_missing
 it "targets the existing Turn span id via merge"              t_stop_turn_update_has_correct_id
 it "sets _is_merge=true on the update"                        t_stop_merge_flag_is_set
-it "includes end-time and token-total metrics on the merge"   t_stop_includes_metrics_in_merge
+it "merge carries end time but no token metrics"              t_stop_merge_has_end_time_no_tokens
