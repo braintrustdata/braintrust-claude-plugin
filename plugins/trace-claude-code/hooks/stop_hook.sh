@@ -13,6 +13,18 @@
 #       └── ...
 #
 # Each assistant message block = one LLM call
+#
+# Token accounting note / known ceiling:
+#   Token counts are derived entirely from the transcript. For every request
+#   that the transcript records, our totals match Claude Code's /usage exactly.
+#   The exception is Claude Code's *internal background* model calls - chiefly
+#   automatic session-title generation (and conversation summarization). These
+#   are billed in /usage but the transcript stores only their result (e.g. an
+#   `ai-title` line) with NO requestId, model, or usage, and no hook payload
+#   carries their tokens. They are therefore unrecoverable, so an interactive
+#   session's traced totals can read slightly below /usage (a small amount of
+#   opus cache-read tokens). Non-interactive (-p) runs don't make these calls
+#   and reconcile exactly. See README "token accounting".
 ###
 
 set -e

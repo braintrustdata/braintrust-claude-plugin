@@ -78,3 +78,20 @@ To attach claude code to an experiment's trace, specify CC_EXPERIMENT_ID as well
 ```bash
 claude --settings '{"env":{"CC_PARENT_SPAN_ID":"parent-span-id","CC_ROOT_SPAN_ID":"root-span-id", "CC_EXPERIMENT_ID":"the-experiment-id"}}' -p "task"
 ```
+
+#### token accounting
+
+The plugin derives token usage from the conversation transcript that Claude Code
+writes. For every model request that appears in the transcript — the main
+conversation and sub-agents alike — the traced token counts match Claude Code's
+own `/usage` exactly (input, output, cache read, and cache write).
+
+There is one known and unavoidable exception: **Claude Code's internal background
+model calls** (most notably the automatic **session-title generation**, and
+conversation summarization). These calls are billed and counted in `/usage`, but
+Claude Code records only their result (e.g. an `ai-title` entry) in the
+transcript — never a request id, model, or token usage — and they are not exposed
+through any hook. Because the plugin has no data source for these tokens, traced
+totals for an interactive session can read slightly below `/usage` (typically a
+small amount of opus cache-read tokens for the title call). Non-interactive
+(`-p`) sessions do not make these background calls and reconcile exactly.
