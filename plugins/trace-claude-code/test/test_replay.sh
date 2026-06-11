@@ -107,3 +107,44 @@ t_replay_missing_fixture() {
 }
 
 it "returns non-zero when the fixture directory does not exist" t_replay_missing_fixture
+
+# ---------------------------------------------------------------------------
+describe "replay_session: record-only events run their no-op handler"
+# ---------------------------------------------------------------------------
+
+# Replay is hooks.json-driven: every event runs whatever is registered for
+# it. Record-only events (PreToolUse, PreCompact, InstructionsLoaded, ...)
+# are registered to record_event.sh, which no-ops when recording is off.
+# So they replay successfully and produce no spans, while the acting hooks
+# create their spans. Replay must never fail just because an event is
+# observability-only.
+t_replay_runs_record_only_handlers() {
+    _setup_default_stubs
+
+    # Build a fixture that interleaves record-only events among the acting
+    # hooks. All names are Claude Code's CamelCase event names.
+    local dir="$TEST_TMP/mixed-fixture"
+    mkdir -p "$dir/transcripts"
+    {
+        echo '{"ts":"t0","hook":"SessionStart","payload":{"session_id":"mix-1","cwd":"/tmp","hook_event_name":"SessionStart"}}'
+        echo '{"ts":"t1","hook":"InstructionsLoaded","payload":{"session_id":"mix-1","hook_event_name":"InstructionsLoaded"}}'
+        echo '{"ts":"t2","hook":"UserPromptSubmit","payload":{"session_id":"mix-1","prompt":"hi","cwd":"/tmp","hook_event_name":"UserPromptSubmit"}}'
+        echo '{"ts":"t3","hook":"PreToolUse","payload":{"session_id":"mix-1","tool_name":"Bash","hook_event_name":"PreToolUse"}}'
+        echo '{"ts":"t4","hook":"PostToolUse","payload":{"session_id":"mix-1","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"output":"x"},"hook_event_name":"PostToolUse"}}'
+        echo '{"ts":"t5","hook":"PreCompact","payload":{"session_id":"mix-1","trigger":"auto","hook_event_name":"PreCompact"}}'
+        echo '{"ts":"t6","hook":"SessionEnd","payload":{"session_id":"mix-1","hook_event_name":"SessionEnd"}}'
+    } > "$dir/events.ndjson"
+
+    # Every event has a registered handler in hooks.json, so all 7 run.
+    local n
+    n=$(replay_session "$dir")
+    assert_success "$?" "replay should not fail on record-only events"
+    assert_eq "$n" "7" "all 7 events have a handler and should replay"
+
+    # Only the acting hooks produce spans (session + turn + tool). The
+    # record-only events no-op, contributing nothing.
+    assert_eq "$(span_count_by_type task)" "2" "session + turn task spans"
+    assert_eq "$(span_count_by_type tool)" "1" "one tool span from PostToolUse"
+}
+
+it "runs record-only event handlers as no-ops without failing" t_replay_runs_record_only_handlers

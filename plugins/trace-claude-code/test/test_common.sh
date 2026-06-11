@@ -207,3 +207,82 @@ t_uuid_unique() {
 
 it "returns a non-empty lowercase UUID"        t_uuid_format
 it "returns unique values on subsequent calls" t_uuid_unique
+
+# ---------------------------------------------------------------------------
+describe "record_hook_input: event labeling and transcript snapshots"
+# ---------------------------------------------------------------------------
+
+# Helper: point recording at a fresh dir under the test's isolated HOME.
+_rec_dir() {
+    echo "$HOME/recording"
+}
+
+t_record_labels_by_event_name() {
+    # The recorded event should be labeled with the payload's
+    # hook_event_name (CamelCase), regardless of the name passed in.
+    export BRAINTRUST_RECORD_DIR="$(_rec_dir)"
+    local payload='{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}'
+    record_hook_input "ignored_arg" "$payload"
+
+    local label
+    label=$(jq -r '.hook' "$BRAINTRUST_RECORD_DIR/events.ndjson")
+    assert_eq "$label" "PreToolUse" "event labeled by hook_event_name"
+}
+
+t_record_falls_back_to_arg_name() {
+    # When the payload has no hook_event_name, fall back to the passed name.
+    export BRAINTRUST_RECORD_DIR="$(_rec_dir)"
+    record_hook_input "CwdChanged" '{"session_id":"s1"}'
+
+    local label
+    label=$(jq -r '.hook' "$BRAINTRUST_RECORD_DIR/events.ndjson")
+    assert_eq "$label" "CwdChanged" "falls back to caller-supplied name"
+}
+
+t_record_copies_main_transcript_on_stop() {
+    # Regression guard: a Stop event must snapshot the main transcript into
+    # transcripts/. (This broke once when the copy guard still checked the
+    # old snake_case name after we switched to CamelCase labels.)
+    export BRAINTRUST_RECORD_DIR="$(_rec_dir)"
+    local transcript="$HOME/main.jsonl"
+    echo '{"type":"assistant"}' > "$transcript"
+
+    local payload
+    payload=$(jq -nc --arg t "$transcript" \
+        '{session_id:"s1", hook_event_name:"Stop", transcript_path:$t}')
+    record_hook_input "stop_hook" "$payload"
+
+    assert_file_exists "$BRAINTRUST_RECORD_DIR/transcripts/main.jsonl" \
+        "Stop should copy the main transcript"
+}
+
+t_record_copies_agent_transcript_on_subagent_stop() {
+    # SubagentStop must snapshot the sub-agent's own transcript (which holds
+    # its model calls, e.g. haiku) before Claude Code can clean it up.
+    export BRAINTRUST_RECORD_DIR="$(_rec_dir)"
+    local agent_t="$HOME/agent-abc123.jsonl"
+    echo '{"type":"assistant"}' > "$agent_t"
+
+    local payload
+    payload=$(jq -nc --arg t "$agent_t" \
+        '{session_id:"s1", hook_event_name:"SubagentStop", agent_id:"abc123", agent_transcript_path:$t}')
+    record_hook_input "ignored" "$payload"
+
+    assert_file_exists "$BRAINTRUST_RECORD_DIR/transcripts/agent-abc123.jsonl" \
+        "SubagentStop should copy the agent transcript"
+}
+
+t_record_off_is_noop() {
+    # With no BRAINTRUST_RECORD_DIR, recording must write nothing.
+    unset BRAINTRUST_RECORD_DIR
+    record_hook_input "Stop" '{"session_id":"s1","hook_event_name":"Stop"}'
+    # Nothing to assert beyond "no crash"; the absence of a recording dir
+    # means there is no file to inspect. Exit status should be success.
+    assert_success "$?" "record_hook_input is a no-op when recording is off"
+}
+
+it "labels recorded events by hook_event_name"        t_record_labels_by_event_name
+it "falls back to the caller-supplied name"           t_record_falls_back_to_arg_name
+it "copies the main transcript on Stop"               t_record_copies_main_transcript_on_stop
+it "copies the agent transcript on SubagentStop"      t_record_copies_agent_transcript_on_subagent_stop
+it "is a no-op when recording is disabled"            t_record_off_is_noop

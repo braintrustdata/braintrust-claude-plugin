@@ -96,6 +96,17 @@ record_hook_input() {
         payload_field=$(jq -nc --arg p "$payload" '$p')
     fi
 
+    # Always label the event with Claude Code's canonical event name. The
+    # payload carries it as `hook_event_name` (e.g. "SessionStart",
+    # "PostToolUse", "PreCompact"); fall back to the caller-supplied name
+    # only when the payload doesn't include it. This gives the recording a
+    # single CamelCase namespace so replay can dispatch every event through
+    # hooks.json exactly the way Claude Code does.
+    local event_name
+    event_name=$(echo "$payload_field" | jq -r '.hook_event_name // empty' 2>/dev/null)
+    [ -z "$event_name" ] && event_name="$hook_name"
+    hook_name="$event_name"
+
     local record
     record=$(jq -nc \
         --arg ts "$ts" \
@@ -156,19 +167,37 @@ record_hook_input() {
         return 0
     fi
 
-    # For the Stop hook, also snapshot the referenced transcript file so it
-    # can be replayed deterministically. (Path rewriting from absolute to
-    # fixture-relative happens at replay time in test/helpers/replay.sh,
-    # not here; we only copy the file.)
-    if [ "$hook_name" = "stop_hook" ]; then
-        local transcript_path
-        transcript_path=$(echo "$payload" | jq -r '.transcript_path // empty' 2>/dev/null)
-        if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
-            local basename_t
-            basename_t=$(basename "$transcript_path")
-            cp "$transcript_path" "$BRAINTRUST_RECORD_DIR/transcripts/$basename_t" 2>/dev/null || true
-        fi
-    fi
+    # Snapshot any transcript files referenced by this event so the
+    # recording can be replayed deterministically. (Path rewriting from
+    # absolute to fixture-relative happens at replay time in
+    # test/helpers/replay.sh, not here; we only copy the files.)
+    #
+    # Two cases:
+    #   - Stop carries `transcript_path` (the main conversation transcript).
+    #   - SubagentStop carries `agent_transcript_path` (the sub-agent's own
+    #     transcript, which holds its model calls - e.g. haiku - and which
+    #     Claude Code may clean up shortly after the agent finishes, so we
+    #     must snapshot it now, while it still exists).
+    #
+    # All transcripts land flat in transcripts/. Basenames are globally
+    # unique (main: "<session>.jsonl"; agent: "agent-<id>.jsonl"), so there
+    # is no collision and replay can resolve any of them by basename.
+    _snapshot_transcript() {
+        local src="$1"
+        [ -n "$src" ] && [ -f "$src" ] || return 0
+        local base
+        base=$(basename "$src")
+        cp "$src" "$BRAINTRUST_RECORD_DIR/transcripts/$base" 2>/dev/null || true
+    }
+
+    case "$hook_name" in
+        Stop)
+            _snapshot_transcript "$(echo "$payload" | jq -r '.transcript_path // empty' 2>/dev/null)"
+            ;;
+        SubagentStop)
+            _snapshot_transcript "$(echo "$payload" | jq -r '.agent_transcript_path // empty' 2>/dev/null)"
+            ;;
+    esac
 }
 
 ###
