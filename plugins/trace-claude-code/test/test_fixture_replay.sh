@@ -278,3 +278,81 @@ t_token_dedupe_totals() {
 
 it "turn token totals count each requestId once (no per-content-block double-count)" \
     t_token_dedupe_totals
+
+# ---------------------------------------------------------------------------
+describe "subagent-compact: sub-agent LLM spans"
+# ---------------------------------------------------------------------------
+
+# Real recorded session that launched Explore sub-agents. Each sub-agent made
+# its own model calls and wrote its own transcript, which the recorder
+# snapshotted into transcripts/agent-<id>.jsonl. On replay, post_tool_use.sh
+# (for the Agent tool) must parse those transcripts and emit one LLM span per
+# sub-agent API request, nested under the corresponding Agent tool span.
+#
+# Rather than hard-coding token goldens (which would break every time the
+# fixture is re-recorded), we DERIVE the expected span count and token totals
+# directly from the fixture's own sub-agent transcripts, applying the same
+# rules the production code does: dedupe by requestId, count output_tokens as
+# the MAX per request (it streams cumulatively), and count input/cache once.
+# The test then asserts the replayed spans match that derived expectation.
+SUBAGENT_FIXTURE="$SCRIPT_DIR/fixtures/sessions/subagent-compact"
+
+# Compute expected {spans,output,cache_read,cache_creation} from the fixture's
+# agent-*.jsonl transcripts. Prints a compact JSON object.
+_expected_subagent_totals() {
+    jq -s '
+        [ .[]
+          | select(.type=="assistant")
+          | select(.message.usage != null)
+          | { rid:(.requestId // .message.id),
+              out:(.message.usage.output_tokens // 0),
+              cr:(.message.usage.cache_read_input_tokens // 0),
+              cc:(.message.usage.cache_creation_input_tokens // 0) }
+        ]
+        | group_by(.rid)
+        | { spans: length,
+            output:         (map([.[].out]|max) | add),
+            cache_read:     (map(.[0].cr)       | add),
+            cache_creation: (map(.[0].cc)       | add) }
+    ' "$SUBAGENT_FIXTURE"/transcripts/agent-*.jsonl
+}
+
+t_subagent_llm_spans() {
+    # Skip cleanly if the fixture hasn't been (re-)recorded yet.
+    if ! ls "$SUBAGENT_FIXTURE"/transcripts/agent-*.jsonl >/dev/null 2>&1; then
+        skip "subagent-compact fixture not present; record one to enable this test"
+        return 0
+    fi
+
+    _setup_default_stubs
+    replay_session "$SUBAGENT_FIXTURE" >/dev/null
+
+    local expected
+    expected=$(_expected_subagent_totals)
+    local exp_spans exp_out exp_cr exp_cc
+    exp_spans=$(echo "$expected" | jq '.spans')
+    exp_out=$(echo "$expected" | jq '.output')
+    exp_cr=$(echo "$expected" | jq '.cache_read')
+    exp_cc=$(echo "$expected" | jq '.cache_creation')
+
+    # Collect the sub-agent LLM spans: llm spans whose parent is an Agent
+    # tool span (model-agnostic, since the sub-agent model may differ between
+    # recordings).
+    local agent_ids subagent_spans
+    agent_ids=$(all_spans | jq -c '[.[] | select(.span_attributes.type=="tool" and .span_attributes.name=="Agent") | .span_id]')
+    subagent_spans=$(all_spans | jq --argjson a "$agent_ids" \
+        '[.[] | select(.span_attributes.type=="llm") | select(.span_parents[0] as $p | ($a | index($p)) != null)]')
+
+    # Span count and deduped token totals match what the transcripts imply.
+    assert_eq "$(echo "$subagent_spans" | jq 'length')" "$exp_spans" "sub-agent span count matches transcripts"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.completion_tokens]|add')"           "$exp_out" "sub-agent completion (max per request)"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.cache_read_input_tokens]|add')"     "$exp_cr"  "sub-agent cache_read total"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.cache_creation_input_tokens]|add')" "$exp_cc"  "sub-agent cache_creation total"
+
+    # Sanity: at least one sub-agent span was actually produced.
+    if [ "$exp_spans" -gt 0 ]; then
+        assert_eq "$(echo "$subagent_spans" | jq 'length > 0')" "true" "expected some sub-agent spans"
+    fi
+}
+
+it "emits sub-agent spans under Agent tool spans matching the transcripts" t_subagent_llm_spans

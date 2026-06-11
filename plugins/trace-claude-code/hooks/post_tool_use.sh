@@ -116,4 +116,46 @@ enqueue_span "$SESSION_ID" "$PROJECT_ID" "$EVENT" || { log "ERROR" "Failed to en
 
 log "INFO" "Tool: $SPAN_NAME (turn=$TURN_SPAN_ID)"
 
+# For Agent (sub-agent) tool calls, surface the sub-agent's own model calls
+# (e.g. claude-haiku-4-5) as LLM spans nested under this Agent tool span.
+# Claude Code writes each sub-agent's conversation to its own transcript at
+#   <projects_dir>/<session_id>/subagents/agent-<agentId>.jsonl
+# which we derive from the main transcript_path + the agentId in the tool
+# response. We do this in PostToolUse (not SubagentStop) because SubagentStop
+# fires *before* PostToolUse, so the Agent tool span does not exist yet then.
+if [ "$TOOL_NAME" = "Agent" ]; then
+    AGENT_ID=$(echo "$TOOL_OUTPUT" | jq -r '.agentId // .agent_id // empty' 2>/dev/null)
+    MAIN_TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+
+    if [ -n "$AGENT_ID" ] && [ -n "$MAIN_TRANSCRIPT" ]; then
+        TRANSCRIPT_DIR=$(dirname "$MAIN_TRANSCRIPT")
+        SESSION_BASENAME=$(basename "$MAIN_TRANSCRIPT" .jsonl)
+        AGENT_FILE_NAME="agent-${AGENT_ID}.jsonl"
+
+        # Candidate locations, in priority order:
+        #   1. Live layout: <dir>/<session>/subagents/agent-<id>.jsonl
+        #   2. Replay/flat layout: <dir>/agent-<id>.jsonl  (record_hook_input
+        #      snapshots agent transcripts flat next to the main one, and
+        #      replay rewrites transcript_path into that flat transcripts/ dir)
+        AGENT_TRANSCRIPT=""
+        for candidate in \
+            "$TRANSCRIPT_DIR/$SESSION_BASENAME/subagents/$AGENT_FILE_NAME" \
+            "$TRANSCRIPT_DIR/$AGENT_FILE_NAME"; do
+            if [ -f "$candidate" ]; then
+                AGENT_TRANSCRIPT="$candidate"
+                break
+            fi
+        done
+
+        if [ -n "$AGENT_TRANSCRIPT" ]; then
+            N_LLM=$(emit_llm_spans_from_transcript \
+                "$AGENT_TRANSCRIPT" "$SESSION_ID" "$PROJECT_ID" \
+                "$ROOT_SPAN_ID" "$SPAN_ID")
+            log "INFO" "Sub-agent $AGENT_ID: emitted ${N_LLM:-0} LLM spans under $SPAN_NAME"
+        else
+            debug "Agent transcript not found for agent_id=$AGENT_ID (looked under $TRANSCRIPT_DIR)"
+        fi
+    fi
+fi
+
 exit 0

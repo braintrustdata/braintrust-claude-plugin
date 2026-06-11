@@ -196,3 +196,12 @@ fail() {
     _fail "${1:-explicit fail}"
     return 1
 }
+
+# Skip the current test without failing it. Prints a note; the test body
+# should `return 0` immediately after calling this. The test still counts as
+# run/passed (it makes no assertions), which keeps the suite green when an
+# optional fixture is absent.
+skip() {
+    printf '      %s(skipped) %s%s\n' "$C_YELLOW" "${1:-no reason given}" "$C_RESET"
+    return 0
+}

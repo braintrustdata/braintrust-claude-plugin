@@ -96,13 +96,22 @@ CURRENT_END_TIMESTAMP=""    # ISO timestamp when this LLM call ended
 LINE_NUM=0
 
 # Claude Code writes one transcript line per content block (thinking, text,
-# each tool_use) and every line belonging to the same API response repeats the
-# identical `usage` block, tagged with the same `requestId`. A single response
-# can also straddle a tool_result boundary (the same requestId reappears after
-# tool output). To avoid multiplying a single response's tokens by its
-# content-block count, we count each requestId's usage exactly once across the
-# whole turn. This holds the space-separated set of requestIds already counted.
+# each tool_use) tagged with the same `requestId` for a single API response.
+# Within a response, input/cache usage is repeated identically on every line,
+# but `output_tokens` is reported CUMULATIVELY as the response streams (early
+# lines hold partials, the final line holds the true total). A response can
+# also straddle a tool_result boundary (the same requestId reappears after
+# tool output).
+#
+# To count each response correctly we therefore:
+#   - add input/cache exactly once per requestId (first sighting), and
+#   - track the running MAX output per requestId, adding only the delta when a
+#     larger value appears, so the total reflects the final (max) output.
+#
+# SEEN_REQUEST_IDS holds requestIds whose input/cache have been counted.
+# REQUEST_OUTPUT_MAX maps "<rid>=<max_output_so_far>" so we can add deltas.
 SEEN_REQUEST_IDS=" "
+REQUEST_OUTPUT_MAX=" "
 
 # Turn-level token aggregates. We sum each LLM call's token counts so the
 # Turn span's metrics reflect the total cost of the turn. The Turn's
@@ -355,30 +364,61 @@ while IFS= read -r line; do
         MODEL=$(echo "$line" | jq -r '.message.model // empty' 2>/dev/null)
         [ -n "$MODEL" ] && CURRENT_MODEL="$MODEL"
 
-        # Extract tokens. Dedupe by requestId so a single API response whose
-        # usage is repeated across multiple content-block lines is counted
-        # once. Lines without a requestId (rare) fall back to the message id;
-        # if neither is present we count the usage as-is.
+        # Extract tokens. A single API response repeats across multiple
+        # content-block lines sharing one requestId. Input/cache are identical
+        # on every line (count once); output_tokens streams cumulatively
+        # (track the running max and add only deltas). Lines without a
+        # requestId (rare) fall back to message id; if neither is present we
+        # treat each line as its own request.
         REQUEST_ID=$(echo "$line" | jq -r '.requestId // .message.id // empty' 2>/dev/null)
-        ALREADY_COUNTED=false
-        if [ -n "$REQUEST_ID" ]; then
-            case "$SEEN_REQUEST_IDS" in
-                *" $REQUEST_ID "*) ALREADY_COUNTED=true ;;
-                *) SEEN_REQUEST_IDS="${SEEN_REQUEST_IDS}${REQUEST_ID} " ;;
-            esac
-        fi
 
         USAGE=$(echo "$line" | jq -c '.message.usage // {}' 2>/dev/null)
-        if [ "$ALREADY_COUNTED" = "false" ] && [ "$USAGE" != "{}" ] && [ -n "$USAGE" ]; then
+        if [ "$USAGE" != "{}" ] && [ -n "$USAGE" ]; then
             INPUT_TOKENS=$(echo "$USAGE" | jq -r '.input_tokens // 0' 2>/dev/null)
             OUTPUT_TOKENS=$(echo "$USAGE" | jq -r '.output_tokens // 0' 2>/dev/null)
             CACHE_CREATION=$(echo "$USAGE" | jq -r '.cache_creation_input_tokens // 0' 2>/dev/null)
             CACHE_READ=$(echo "$USAGE" | jq -r '.cache_read_input_tokens // 0' 2>/dev/null)
+            [ "$INPUT_TOKENS" = "null" ] && INPUT_TOKENS=0
+            [ "$OUTPUT_TOKENS" = "null" ] && OUTPUT_TOKENS=0
+            [ "$CACHE_CREATION" = "null" ] && CACHE_CREATION=0
+            [ "$CACHE_READ" = "null" ] && CACHE_READ=0
 
-            [ "$INPUT_TOKENS" != "null" ] && [ "$INPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_PROMPT_TOKENS=$((CURRENT_PROMPT_TOKENS + INPUT_TOKENS))
-            [ "$OUTPUT_TOKENS" != "null" ] && [ "$OUTPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_COMPLETION_TOKENS=$((CURRENT_COMPLETION_TOKENS + OUTPUT_TOKENS))
-            [ "$CACHE_CREATION" != "null" ] && [ "$CACHE_CREATION" -gt 0 ] 2>/dev/null && CURRENT_CACHE_CREATION_TOKENS=$((CURRENT_CACHE_CREATION_TOKENS + CACHE_CREATION))
-            [ "$CACHE_READ" != "null" ] && [ "$CACHE_READ" -gt 0 ] 2>/dev/null && CURRENT_CACHE_READ_TOKENS=$((CURRENT_CACHE_READ_TOKENS + CACHE_READ))
+            # Determine whether input/cache for this requestId were already
+            # counted, and fetch the prior max output for delta accounting.
+            local_first_sighting=true
+            prior_output=0
+            if [ -n "$REQUEST_ID" ]; then
+                case "$SEEN_REQUEST_IDS" in
+                    *" $REQUEST_ID "*) local_first_sighting=false ;;
+                    *) SEEN_REQUEST_IDS="${SEEN_REQUEST_IDS}${REQUEST_ID} " ;;
+                esac
+                # Look up the prior max output recorded for this requestId.
+                case "$REQUEST_OUTPUT_MAX" in
+                    *" ${REQUEST_ID}="*)
+                        prior_output=${REQUEST_OUTPUT_MAX#*" ${REQUEST_ID}="}
+                        prior_output=${prior_output%% *}
+                        ;;
+                esac
+            fi
+
+            # Input + cache: count once per requestId (constant across lines).
+            if [ "$local_first_sighting" = "true" ]; then
+                [ "$INPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_PROMPT_TOKENS=$((CURRENT_PROMPT_TOKENS + INPUT_TOKENS))
+                [ "$CACHE_CREATION" -gt 0 ] 2>/dev/null && CURRENT_CACHE_CREATION_TOKENS=$((CURRENT_CACHE_CREATION_TOKENS + CACHE_CREATION))
+                [ "$CACHE_READ" -gt 0 ] 2>/dev/null && CURRENT_CACHE_READ_TOKENS=$((CURRENT_CACHE_READ_TOKENS + CACHE_READ))
+            fi
+
+            # Output: add only the increase over this requestId's prior max,
+            # so the running total converges on the final (largest) value.
+            if [ -z "$REQUEST_ID" ]; then
+                # No requestId: treat as a standalone response.
+                [ "$OUTPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_COMPLETION_TOKENS=$((CURRENT_COMPLETION_TOKENS + OUTPUT_TOKENS))
+            elif [ "$OUTPUT_TOKENS" -gt "$prior_output" ] 2>/dev/null; then
+                CURRENT_COMPLETION_TOKENS=$((CURRENT_COMPLETION_TOKENS + OUTPUT_TOKENS - prior_output))
+                # Record the new max for this requestId.
+                REQUEST_OUTPUT_MAX="${REQUEST_OUTPUT_MAX//" ${REQUEST_ID}=${prior_output} "/" "}"
+                REQUEST_OUTPUT_MAX="${REQUEST_OUTPUT_MAX}${REQUEST_ID}=${OUTPUT_TOKENS} "
+            fi
         fi
     fi
 done < "$CONV_FILE"
