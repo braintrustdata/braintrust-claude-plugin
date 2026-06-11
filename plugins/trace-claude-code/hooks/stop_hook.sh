@@ -141,20 +141,6 @@ add_to_history() {
     fi
 }
 
-# Convert ISO timestamp (UTC with Z suffix) to Unix epoch
-iso_to_epoch() {
-    local ts="$1"
-    [ -z "$ts" ] && { date +%s; return; }
-    # Remove the Z and milliseconds, parse as UTC
-    local clean_ts="${ts%.*}"  # Remove .xxxZ
-    clean_ts="${clean_ts}+0000"  # Append UTC offset
-    # macOS: use -j -f with explicit UTC offset
-    date -j -f "%Y-%m-%dT%H:%M:%S%z" "$clean_ts" "+%s" 2>/dev/null || \
-    # Linux: -d handles ISO format natively
-    date -d "$ts" "+%s" 2>/dev/null || \
-    date +%s
-}
-
 create_llm_span() {
     local output_text="$1"
     local model="$2"
@@ -172,8 +158,8 @@ create_llm_span() {
 
     local span_id=$(generate_uuid)
     local total_tokens=$((prompt_tokens + completion_tokens))
-    local start_time=$(iso_to_epoch "$start_ts")
-    local end_time=$(iso_to_epoch "$end_ts")
+    local start_time=$(_iso_to_epoch "$start_ts")
+    local end_time=$(_iso_to_epoch "$end_ts")
 
     # Input is the conversation history up to this point
     local input_json="$input_history"
@@ -238,6 +224,37 @@ create_llm_span() {
     fi
 }
 
+# Flush the pending assistant segment at a boundary (tool_result, real user
+# message, or end of transcript).
+#
+# A single API response (one requestId) can span multiple tool_result
+# boundaries: it emits a tool_use, gets a tool_result, then emits MORE
+# tool_use blocks under the SAME requestId. Input/cache for that requestId
+# are counted once and output is tracked as a running max, so every segment
+# AFTER the first carries zero new tokens. Emitting a span for those
+# continuation segments would create misleading all-zero-token LLM spans and
+# split one logical response across several spans.
+#
+# To match the per-requestId grouping the sub-agent path uses, we only emit
+# an LLM span when the pending segment actually accrued token metrics (its
+# first sighting). Continuation segments are still recorded into the
+# conversation history (so tool calls keep their context) but do not produce
+# their own span.
+flush_pending_llm() {
+    [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ] || return 0
+
+    if [ "$CURRENT_PROMPT_TOKENS" -gt 0 ] 2>/dev/null \
+        || [ "$CURRENT_COMPLETION_TOKENS" -gt 0 ] 2>/dev/null \
+        || [ "$CURRENT_CACHE_CREATION_TOKENS" -gt 0 ] 2>/dev/null \
+        || [ "$CURRENT_CACHE_READ_TOKENS" -gt 0 ] 2>/dev/null; then
+        create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
+    fi
+
+    # Always thread the assistant turn into history, whether or not a span
+    # was emitted, so subsequent tool results / messages keep their context.
+    add_to_history "assistant" "$CURRENT_OUTPUT_TEXT" "" "$CURRENT_TOOL_CALLS"
+}
+
 while IFS= read -r line; do
     LINE_NUM=$((LINE_NUM + 1))
     [ "$LINE_NUM" -le "$TURN_LAST_LINE" ] && continue
@@ -252,12 +269,11 @@ while IFS= read -r line; do
         IS_TOOL_RESULT=$(echo "$CONTENT" | jq -e '.[0].type == "tool_result"' >/dev/null 2>&1 && echo "true" || echo "false")
 
         if [ "$IS_TOOL_RESULT" = "true" ]; then
-            # Tool result - if we have pending output, save it first
-            if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
-                create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
-                # Add assistant response to history
-                add_to_history "assistant" "$CURRENT_OUTPUT_TEXT" "" "$CURRENT_TOOL_CALLS"
-            fi
+            # Tool result - flush any pending assistant segment first. This
+            # emits an LLM span only if the segment accrued tokens (a fresh
+            # requestId); continuation segments of an already-counted
+            # requestId are folded into history without a separate span.
+            flush_pending_llm
 
             # Extract tool result content and tool_use_id
             TOOL_RESULT_CONTENT=$(echo "$CONTENT" | jq -r '.[0].content // "tool result"' 2>/dev/null)
@@ -278,12 +294,8 @@ while IFS= read -r line; do
             CURRENT_START_TIMESTAMP=""  # Will be set from first assistant message
             CURRENT_END_TIMESTAMP=""
         else
-            # Real user message - if we have pending output, save it
-            if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
-                create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
-                # Add assistant response to history
-                add_to_history "assistant" "$CURRENT_OUTPUT_TEXT" "" "$CURRENT_TOOL_CALLS"
-            fi
+            # Real user message - flush any pending assistant segment first.
+            flush_pending_llm
 
             # Add user message to conversation history
             add_to_history "user" "$CONTENT" "" ""
@@ -405,18 +417,22 @@ while IFS= read -r line; do
                 [ "$OUTPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_COMPLETION_TOKENS=$((CURRENT_COMPLETION_TOKENS + OUTPUT_TOKENS))
             elif [ "$OUTPUT_TOKENS" -gt "$prior_output" ] 2>/dev/null; then
                 CURRENT_COMPLETION_TOKENS=$((CURRENT_COMPLETION_TOKENS + OUTPUT_TOKENS - prior_output))
-                # Record the new max for this requestId.
-                REQUEST_OUTPUT_MAX="${REQUEST_OUTPUT_MAX//" ${REQUEST_ID}=${prior_output} "/" "}"
+                # Record the new max for this requestId. Use an intermediate
+                # variable for the pattern: nesting double-quotes inside the
+                # ${var//pat/repl} expansion does NOT produce the intended
+                # pattern and instead corrupts REQUEST_OUTPUT_MAX, so on the
+                # next sighting the prior max can't be found and the full
+                # output gets re-added as a bogus delta.
+                _rom_pat=" ${REQUEST_ID}=${prior_output} "
+                REQUEST_OUTPUT_MAX="${REQUEST_OUTPUT_MAX//$_rom_pat/ }"
                 REQUEST_OUTPUT_MAX="${REQUEST_OUTPUT_MAX}${REQUEST_ID}=${OUTPUT_TOKENS} "
             fi
         fi
     fi
 done < "$CONV_FILE"
 
-# Save final LLM call
-if [ -n "$CURRENT_OUTPUT_TEXT" ] || [ "$CURRENT_TOOL_CALLS" != "[]" ]; then
-    create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
-fi
+# Save final LLM call (same zero-token suppression as the boundary flushes).
+flush_pending_llm
 
 # Update the Turn span with its end time and Claude's final response via a
 # merge write. The merge keeps the existing fields (input, name, type) set
