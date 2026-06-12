@@ -169,3 +169,93 @@ t_post_tool_no_session_id() {
 
 it "skips silently when payload has no tool_name"   t_post_tool_no_tool_name
 it "skips silently when payload has no session_id"  t_post_tool_no_session_id
+
+# ---------------------------------------------------------------------------
+describe "post_tool_use.sh: Agent sub-agent LLM spans"
+# ---------------------------------------------------------------------------
+
+# When the tool is an Agent (sub-agent), the hook should locate the
+# sub-agent's transcript and emit its model calls as LLM spans nested under
+# the Agent tool span.
+t_agent_emits_subagent_llm_spans() {
+    _with_turn_started "sess-agent"
+
+    # The Agent payload references the main transcript_path. The hook derives
+    # the sub-agent transcript from dirname(transcript_path) + agent-<id>;
+    # we place a synthetic one in that flat fallback location.
+    local main_transcript="$TEST_TMP/88a535be.jsonl"
+    : > "$main_transcript"
+    local agent_id="aea5test"
+    local agent_transcript="$TEST_TMP/agent-${agent_id}.jsonl"
+    {
+        # r1: text + a tool_use (Bash) -> emits an LLM span and a tool span.
+        echo '{"type":"assistant","requestId":"r1","timestamp":"2026-06-11T03:00:00.000Z","message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"ls -la"}}],"usage":{"input_tokens":5,"output_tokens":40,"cache_creation_input_tokens":10,"cache_read_input_tokens":1000}}}'
+        echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"a.txt"}]}}'
+        # r2: final text answer -> emits a second LLM span (with history).
+        echo '{"type":"assistant","requestId":"r2","timestamp":"2026-06-11T03:00:02.000Z","message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"bye"}],"usage":{"input_tokens":3,"output_tokens":20,"cache_creation_input_tokens":5,"cache_read_input_tokens":1500}}}'
+    } > "$agent_transcript"
+
+    # Build an Agent PostToolUse payload with transcript_path + tool_response.agentId.
+    local payload
+    payload=$(jq -nc \
+        --arg s "sess-agent" \
+        --arg tp "$main_transcript" \
+        --arg aid "$agent_id" \
+        '{
+            session_id: $s,
+            transcript_path: $tp,
+            tool_name: "Agent",
+            tool_input: {description: "explore", subagent_type: "Explore"},
+            tool_response: {agentId: $aid, content: "result"}
+        }')
+
+    run_hook post_tool_use.sh "$payload"
+    assert_success "$HOOK_STATUS"
+
+    # Tool spans: the Agent tool span itself + the sub-agent's Bash tool span.
+    assert_eq "$(span_count_by_type tool)" "2" "Agent span + sub-agent Bash tool span"
+    # Two sub-agent LLM spans (r1, r2).
+    assert_eq "$(span_count_by_type llm)"  "2" "two sub-agent LLM spans"
+
+    # The Agent tool span is the one named "Agent"; the sub-agent spans nest
+    # under it.
+    local agent_span_id
+    agent_span_id=$(all_spans | jq -r '[.[]|select(.span_attributes.type=="tool" and .span_attributes.name=="Agent")][0].span_id')
+
+    # Every LLM span is a child of the Agent tool span.
+    local llm_parents_ok
+    llm_parents_ok=$(all_spans | jq --arg p "$agent_span_id" \
+        'all(.[]|select(.span_attributes.type=="llm"); .span_parents[0] == $p)')
+    assert_eq "$llm_parents_ok" "true" "LLM spans nested under the Agent tool span"
+
+    # The sub-agent's Bash tool span also nests under the Agent tool span.
+    local subagent_tool
+    subagent_tool=$(all_spans | jq --arg p "$agent_span_id" \
+        '[.[]|select(.span_attributes.type=="tool" and .span_parents[0]==$p)][0]')
+    assert_eq "$(echo "$subagent_tool" | jq -r '.span_attributes.name')" "Terminal: ls -la" "sub-agent tool span named after the Bash command"
+
+    # Token totals match the deduped transcript (completion 40+20, cache_read 1000+1500).
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.completion_tokens]|add')" "60"   "completion summed"
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.cache_read_input_tokens]|add')" "2500" "cache_read summed"
+
+    # The LLM spans are tagged with the sub-agent's model.
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")]|all(.span_attributes.name=="claude-haiku-4-5")')" "true" "sub-agent model tagged"
+
+    # The second LLM span's input carries the prior assistant + tool history.
+    assert_eq "$(all_spans | jq -r '[.[]|select(.span_attributes.type=="llm")][1].input|map(.role)|join(",")')" "assistant,tool" "sub-agent LLM input includes history"
+}
+
+t_non_agent_tool_emits_no_llm_spans() {
+    # A normal (non-Agent) tool must not emit any LLM spans.
+    _with_turn_started "sess-noagent"
+    local payload
+    payload=$(fixture_post_tool_use "sess-noagent" "Bash" \
+        "$(fixture_tool_input_bash 'ls')" \
+        "$(fixture_tool_response_text 'out')")
+    run_hook post_tool_use.sh "$payload"
+
+    assert_eq "$(span_count_by_type llm)" "0" "no LLM spans for non-Agent tools"
+}
+
+it "emits sub-agent LLM spans under the Agent tool span" t_agent_emits_subagent_llm_spans
+it "does not emit LLM spans for non-Agent tools"         t_non_agent_tool_emits_no_llm_spans

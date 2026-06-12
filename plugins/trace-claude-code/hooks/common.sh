@@ -19,7 +19,7 @@ export BRAINTRUST_SYNC_QUEUE="${BRAINTRUST_SYNC_QUEUE:-false}"
 
 # How long drain_queue will wait (seconds) before giving up. Hooks must
 # never block Claude Code forever.
-export BRAINTRUST_DRAIN_TIMEOUT="${BRAINTRUST_DRAIN_TIMEOUT:-30}"
+export BRAINTRUST_DRAIN_TIMEOUT="${BRAINTRUST_DRAIN_TIMEOUT:-60}"
 
 # How long the worker.lock mtime can be stale (seconds) before a session
 # is considered crashed and its queue dir is swept on the next
@@ -96,6 +96,17 @@ record_hook_input() {
         payload_field=$(jq -nc --arg p "$payload" '$p')
     fi
 
+    # Always label the event with Claude Code's canonical event name. The
+    # payload carries it as `hook_event_name` (e.g. "SessionStart",
+    # "PostToolUse", "PreCompact"); fall back to the caller-supplied name
+    # only when the payload doesn't include it. This gives the recording a
+    # single CamelCase namespace so replay can dispatch every event through
+    # hooks.json exactly the way Claude Code does.
+    local event_name
+    event_name=$(echo "$payload_field" | jq -r '.hook_event_name // empty' 2>/dev/null)
+    [ -z "$event_name" ] && event_name="$hook_name"
+    hook_name="$event_name"
+
     local record
     record=$(jq -nc \
         --arg ts "$ts" \
@@ -156,19 +167,37 @@ record_hook_input() {
         return 0
     fi
 
-    # For the Stop hook, also snapshot the referenced transcript file so it
-    # can be replayed deterministically. (Path rewriting from absolute to
-    # fixture-relative happens at replay time in test/helpers/replay.sh,
-    # not here; we only copy the file.)
-    if [ "$hook_name" = "stop_hook" ]; then
-        local transcript_path
-        transcript_path=$(echo "$payload" | jq -r '.transcript_path // empty' 2>/dev/null)
-        if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
-            local basename_t
-            basename_t=$(basename "$transcript_path")
-            cp "$transcript_path" "$BRAINTRUST_RECORD_DIR/transcripts/$basename_t" 2>/dev/null || true
-        fi
-    fi
+    # Snapshot any transcript files referenced by this event so the
+    # recording can be replayed deterministically. (Path rewriting from
+    # absolute to fixture-relative happens at replay time in
+    # test/helpers/replay.sh, not here; we only copy the files.)
+    #
+    # Two cases:
+    #   - Stop carries `transcript_path` (the main conversation transcript).
+    #   - SubagentStop carries `agent_transcript_path` (the sub-agent's own
+    #     transcript, which holds its model calls - e.g. haiku - and which
+    #     Claude Code may clean up shortly after the agent finishes, so we
+    #     must snapshot it now, while it still exists).
+    #
+    # All transcripts land flat in transcripts/. Basenames are globally
+    # unique (main: "<session>.jsonl"; agent: "agent-<id>.jsonl"), so there
+    # is no collision and replay can resolve any of them by basename.
+    _snapshot_transcript() {
+        local src="$1"
+        [ -n "$src" ] && [ -f "$src" ] || return 0
+        local base
+        base=$(basename "$src")
+        cp "$src" "$BRAINTRUST_RECORD_DIR/transcripts/$base" 2>/dev/null || true
+    }
+
+    case "$hook_name" in
+        Stop)
+            _snapshot_transcript "$(echo "$payload" | jq -r '.transcript_path // empty' 2>/dev/null)"
+            ;;
+        SubagentStop)
+            _snapshot_transcript "$(echo "$payload" | jq -r '.agent_transcript_path // empty' 2>/dev/null)"
+            ;;
+    esac
 }
 
 ###
@@ -859,4 +888,303 @@ get_username() {
 
 get_os() {
     uname -s 2>/dev/null || echo "unknown"
+}
+
+# Version of this plugin, read from its plugin.json manifest. Cached after the
+# first lookup. Returns "unknown" if it can't be read.
+get_plugin_version() {
+    if [ -n "${_PLUGIN_VERSION:-}" ]; then
+        echo "$_PLUGIN_VERSION"
+        return
+    fi
+    local manifest="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/../.claude-plugin/plugin.json"
+    local v=""
+    [ -f "$manifest" ] && v=$(jq -r '.version // empty' "$manifest" 2>/dev/null)
+    _PLUGIN_VERSION="${v:-unknown}"
+    echo "$_PLUGIN_VERSION"
+}
+
+# Version of the running Claude Code CLI. Prefers a version found in the
+# session transcript (authoritative for the run that produced it); falls back
+# to `claude --version`. Cached after the first lookup. Returns "unknown" if
+# neither source is available.
+#
+# Args: [transcript_path] - optional transcript to read `.version` from.
+get_claude_code_version() {
+    local transcript="${1:-}"
+    if [ -n "${_CC_VERSION:-}" ]; then
+        echo "$_CC_VERSION"
+        return
+    fi
+    local v=""
+    if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+        v=$(jq -rc 'select(.version) | .version' "$transcript" 2>/dev/null | head -1)
+    fi
+    if [ -z "$v" ]; then
+        # e.g. "2.1.173 (Claude Code)" -> "2.1.173"
+        v=$(claude --version 2>/dev/null | awk '{print $1}')
+    fi
+    _CC_VERSION="${v:-unknown}"
+    echo "$_CC_VERSION"
+}
+
+###
+# Emit spans for a Claude Code transcript file (typically a sub-agent's own
+# transcript), parented under a given span. This reproduces the same span
+# structure the main conversation uses, so a sub-agent's Agent tool span
+# subtree reads like a miniature conversation:
+#
+#   Agent (tool, the parent)
+#   ├── <model> (llm)   - one model call (plan + tool_use)
+#   ├── <tool>  (tool)  - a tool the sub-agent invoked
+#   ├── <model> (llm)   - next model call (after the tool result)
+#   └── ...
+#
+# We walk the transcript chronologically, threading conversation history so
+# each LLM span's `input` is the messages seen so far and its `output` is the
+# assistant content plus OpenAI-style tool_calls. Each tool_result becomes a
+# tool span.
+#
+# Token accounting mirrors stop_hook.sh: a single API response repeats across
+# content-block lines sharing one requestId; input/cache are identical on each
+# line (count once) while output_tokens streams cumulatively (take the max).
+#
+# Args:
+#   $1 transcript_file - path to the (sub-agent) transcript JSONL
+#   $2 session_id      - session id (for enqueue)
+#   $3 project_id      - project id (for enqueue)
+#   $4 root_span_id    - root span id of the trace
+#   $5 parent_span_id  - span the emitted spans should be children of
+#
+# Returns the number of LLM spans emitted on stdout (tool spans are not
+# counted, to preserve the historical return-value contract). Best-effort:
+# returns 0 and emits nothing if the file is missing or has no usable content.
+emit_llm_spans_from_transcript() {
+    local transcript_file="$1"
+    local session_id="$2"
+    local project_id="$3"
+    local root_span_id="$4"
+    local parent_span_id="$5"
+
+    [ -n "$transcript_file" ] && [ -f "$transcript_file" ] || { echo 0; return 0; }
+
+    # Single jq pass: walk the transcript in order and emit an ordered NDJSON
+    # stream of "span directives", one per line. Each directive is either:
+    #   {kind:"llm",  ...metrics, input:<history>, output:<assistant+tool_calls>}
+    #   {kind:"tool", name, input:<tool args>, output:<tool result>, ts}
+    # History is threaded so each llm directive carries the conversation as it
+    # stood when that call was made. Doing this in jq (rather than a bash loop)
+    # keeps multi-line text and tool JSON intact.
+    local directives
+    directives=$(jq -s -c '
+        # Collapse assistant content-block lines of one response (same
+        # requestId) into a single logical message, taking max tokens and
+        # concatenating text / collecting tool_use blocks.
+        def assistant_calls:
+          [ .[] | select(.type=="assistant") | select(.message.usage != null) ]
+          | group_by(.requestId // .message.id)
+          | map({
+              kind: "llm",
+              rid: (.[0].requestId // .[0].message.id),
+              ts: .[0].timestamp,
+              model: (.[0].message.model // "claude"),
+              input_tokens:          ([ .[].message.usage.input_tokens // 0 ]                | max),
+              output_tokens:         ([ .[].message.usage.output_tokens // 0 ]               | max),
+              cache_creation_tokens: ([ .[].message.usage.cache_creation_input_tokens // 0 ] | max),
+              cache_read_tokens:     ([ .[].message.usage.cache_read_input_tokens // 0 ]     | max),
+              text: ( [ .[].message.content
+                        | if type=="array" then [ .[]|select(.type=="text")|.text ]|join("\n")
+                          elif type=="string" then . else "" end ]
+                      | map(select(. != "")) | join("\n") ),
+              tool_calls: ( [ .[].message.content[]?
+                              | select(.type=="tool_use")
+                              | { id: .id, type: "function",
+                                  function: { name: .name, arguments: (.input|tojson) } } ]
+                            | unique_by(.id) )
+            })
+          # group_by sorts by the grouping key (requestId / message.id), which
+          # is not guaranteed to match conversation order. Re-sort by timestamp
+          # so history threading and span emission follow chronological order.
+          | sort_by(.ts);
+
+        # Tool results, keyed by the tool_use_id they answer.
+        def tool_results:
+          [ .[]
+            | select(.type=="user")
+            | (.message.content) as $c
+            | select(($c|type=="array") and ($c[0].type=="tool_result"))
+            | { kind: "tool",
+                tool_use_id: $c[0].tool_use_id,
+                ts: .timestamp,
+                output: ($c[0].content) } ];
+
+        (assistant_calls) as $llms
+        | (tool_results) as $tools
+        # Index tool results by id so we can attach name/args from the matching
+        # tool_use and place them right after the llm call that issued them.
+        | ( reduce $tools[] as $t ({}; .[$t.tool_use_id] = $t) ) as $tool_by_id
+        # Build the ordered output: for each llm call, emit it (with input
+        # history threaded), then emit a tool span for each of its tool_calls
+        # that has a matching result. We thread { history, out } through a
+        # single reduce; the inner per-tool work is done with map/reduce
+        # expressions that update the accumulator directly (no nested `reduce
+        # (...) as $x`, which jq does not allow).
+        | reduce $llms[] as $call (
+            { history: [], out: [] };
+            # Assistant message object (content + optional tool_calls).
+            ( { role:"assistant", content:$call.text }
+              + ( if ($call.tool_calls|length)>0 then {tool_calls:$call.tool_calls} else {} end )
+            ) as $assistant_msg
+            # The llm directive carries the current history as input.
+            | ( {
+                  kind: "llm",
+                  ts: $call.ts,
+                  model: $call.model,
+                  input_tokens: $call.input_tokens,
+                  output_tokens: $call.output_tokens,
+                  cache_creation_tokens: $call.cache_creation_tokens,
+                  cache_read_tokens: $call.cache_read_tokens,
+                  input: .history,
+                  output: $assistant_msg
+                } ) as $llm_dir
+            # Resolved tool calls for this llm call (those with a matching
+            # result), in order.
+            | ( [ $call.tool_calls[]
+                  | { tc: ., res: $tool_by_id[.id] }
+                  | select(.res != null) ] ) as $resolved
+            # Tool directives to emit after the llm directive.
+            | ( [ $resolved[] | {
+                    kind: "tool",
+                    ts: .res.ts,
+                    name: .tc.function.name,
+                    input: (.tc.function.arguments),
+                    output: (.res.output)
+                  } ] ) as $tool_dirs
+            # History additions: the assistant message, then each tool result.
+            | ( [ $assistant_msg ]
+                + [ $resolved[] | { role:"tool", tool_call_id:.tc.id,
+                                    content: (.res.output|tostring) } ] ) as $hist_add
+            | {
+                history: ( .history + $hist_add ),
+                out: ( .out + [ $llm_dir ] + $tool_dirs )
+              }
+          )
+        | .out[]
+    ' "$transcript_file" 2>/dev/null)
+
+    [ -z "$directives" ] && { echo 0; return 0; }
+
+    local emitted=0
+    local dir
+    while IFS= read -r dir; do
+        [ -z "$dir" ] && continue
+
+        local kind ts epoch span_id
+        kind=$(echo "$dir" | jq -r '.kind')
+        ts=$(echo "$dir" | jq -r '.ts // empty')
+        epoch=$(_iso_to_epoch "$ts")
+        span_id=$(generate_uuid)
+
+        local event
+        if [ "$kind" = "llm" ]; then
+            # LLM span: input is the threaded conversation history, output is
+            # the assistant message (content + tool_calls). Build in one jq
+            # call so multi-line text survives.
+            event=$(echo "$dir" | jq -c \
+                --arg id "$span_id" \
+                --arg root_span_id "$root_span_id" \
+                --arg parent "$parent_span_id" \
+                --argjson epoch "$epoch" \
+                '{
+                    id: $id,
+                    span_id: $id,
+                    root_span_id: $root_span_id,
+                    span_parents: [$parent],
+                    created: (.ts // (now|todate)),
+                    input: .input,
+                    output: .output,
+                    metrics: {
+                        start: $epoch, end: $epoch,
+                        prompt_tokens: .input_tokens,
+                        completion_tokens: .output_tokens,
+                        tokens: (.input_tokens + .output_tokens),
+                        cache_creation_input_tokens: .cache_creation_tokens,
+                        cache_read_input_tokens: .cache_read_tokens
+                    },
+                    metadata: { model: .model },
+                    span_attributes: { name: .model, type: "llm" }
+                }')
+        else
+            # Tool span: mirror post_tool_use.sh shape (name + tool metadata).
+            local tool_name
+            tool_name=$(echo "$dir" | jq -r '.name // "tool"')
+            local span_name
+            span_name=$(_subagent_tool_span_name "$tool_name" "$(echo "$dir" | jq -c '.input')")
+            event=$(echo "$dir" | jq -c \
+                --arg id "$span_id" \
+                --arg root_span_id "$root_span_id" \
+                --arg parent "$parent_span_id" \
+                --arg name "$span_name" \
+                --arg tool "$tool_name" \
+                --argjson epoch "$epoch" \
+                '{
+                    id: $id,
+                    span_id: $id,
+                    root_span_id: $root_span_id,
+                    span_parents: [$parent],
+                    created: (.ts // (now|todate)),
+                    input: (.input | (try fromjson catch .)),
+                    output: .output,
+                    metrics: { start: $epoch, end: $epoch },
+                    metadata: { tool_name: $tool },
+                    span_attributes: { name: $name, type: "tool" }
+                }')
+        fi
+
+        if [ -n "$event" ] && enqueue_span "$session_id" "$project_id" "$event"; then
+            [ "$kind" = "llm" ] && emitted=$((emitted + 1))
+        fi
+    done <<< "$directives"
+
+    echo "$emitted"
+    return 0
+}
+
+# Derive a tool span display name the same way post_tool_use.sh does, so
+# sub-agent tool spans read consistently with top-level tool spans.
+# Args: tool_name, tool_input_json
+_subagent_tool_span_name() {
+    local tool_name="$1"
+    local tool_input="$2"
+    case "$tool_name" in
+        Read|Write|Edit|MultiEdit)
+            local fp
+            fp=$(echo "$tool_input" | jq -r '(. | (try fromjson catch .)) | (.file_path // .path // empty)' 2>/dev/null)
+            [ -n "$fp" ] && echo "$tool_name: $(basename "$fp")" || echo "$tool_name"
+            ;;
+        Bash|Terminal)
+            local cmd
+            cmd=$(echo "$tool_input" | jq -r '(. | (try fromjson catch .)) | (.command // empty)' 2>/dev/null | head -c 50)
+            echo "Terminal: ${cmd:-command}"
+            ;;
+        mcp__*)
+            echo "$tool_name" | sed 's/mcp__/MCP: /' | sed 's/__/ - /'
+            ;;
+        *)
+            echo "$tool_name"
+            ;;
+    esac
+}
+
+# Convert an ISO-8601 timestamp (UTC, e.g. 2026-06-11T03:01:33.000Z) to a
+# Unix epoch. Falls back to the current time when parsing fails. Shared by
+# transcript-parsing code that needs span start/end metrics.
+_iso_to_epoch() {
+    local ts="$1"
+    [ -z "$ts" ] && { date +%s; return; }
+    local clean_ts="${ts%.*}"          # strip .xxxZ
+    clean_ts="${clean_ts}+0000"        # treat as UTC
+    date -j -f "%Y-%m-%dT%H:%M:%S%z" "$clean_ts" "+%s" 2>/dev/null || \
+    date -d "$ts" "+%s" 2>/dev/null || \
+    date +%s
 }

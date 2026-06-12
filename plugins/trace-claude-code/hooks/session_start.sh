@@ -76,6 +76,12 @@ HOSTNAME=$(get_hostname)
 USERNAME=$(get_username)
 OS=$(get_os)
 
+# Version info for observability: this plugin's version and the Claude Code
+# CLI version that produced the session.
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+PLUGIN_VERSION=$(get_plugin_version)
+CLAUDE_CODE_VERSION=$(get_claude_code_version "$TRANSCRIPT_PATH")
+
 EVENT=$(jq -n \
     --arg id "$SPAN_ID" \
     --arg span_id "$SPAN_ID" \
@@ -87,6 +93,8 @@ EVENT=$(jq -n \
     --arg hostname "$HOSTNAME" \
     --arg username "$USERNAME" \
     --arg os "$OS" \
+    --arg plugin_version "$PLUGIN_VERSION" \
+    --arg claude_code_version "$CLAUDE_CODE_VERSION" \
     '{
         id: $id,
         span_id: $span_id,
@@ -99,7 +107,9 @@ EVENT=$(jq -n \
             hostname: $hostname,
             username: $username,
             os: $os,
-            source: "claude-code"
+            source: "claude-code",
+            trace_claude_code_version: $plugin_version,
+            claude_code_version: $claude_code_version
         },
         span_attributes: {
             name: ("Claude Code: " + $workspace),

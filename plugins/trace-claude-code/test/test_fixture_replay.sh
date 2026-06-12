@@ -222,3 +222,128 @@ t_llm_content() {
 }
 
 it "LLM spans use claude-opus-4-7 and have sensible token metrics" t_llm_content
+
+# ---------------------------------------------------------------------------
+describe "test-fixture: token totals dedupe by requestId"
+# ---------------------------------------------------------------------------
+
+# Regression test for the double-counting bug: Claude Code writes one
+# transcript line per content block (thinking, text, each tool_use) and
+# every line for the same API response repeats the identical `usage` block,
+# tagged with the same `requestId`. The stop_hook must count each response's
+# usage exactly once, not once per content-block line.
+#
+# The fixture transcript has 30 assistant lines but only 7 unique
+# requestIds. We assert the dedup by summing metrics across the LLM spans
+# (token metrics live only on LLM spans now - the Turn merge carries no
+# token totals; Braintrust aggregates them for display). Summing all LLM
+# spans gives the whole-session totals, which must match the deduped
+# expectation. Before the fix, output alone would be 425*4 + ... + 745*8 +
+# ... = thousands too high.
+t_token_dedupe_totals() {
+    _setup_default_stubs
+    replay_session "$FIXTURE_DIR" >/dev/null
+
+    # Sum metrics across all LLM spans (this fixture has no sub-agents, so
+    # all LLM spans are the main-conversation calls).
+    local llms
+    llms=$(all_spans | jq '[.[] | select(.span_attributes.type == "llm")]')
+
+    local total_prompt total_completion total_cache_creation total_cache_read
+    total_prompt=$(echo "$llms" | jq '[.[].metrics.prompt_tokens // 0] | add')
+    total_completion=$(echo "$llms" | jq '[.[].metrics.completion_tokens // 0] | add')
+    total_cache_creation=$(echo "$llms" | jq '[.[].metrics.cache_creation_input_tokens // 0] | add')
+    total_cache_read=$(echo "$llms" | jq '[.[].metrics.cache_read_input_tokens // 0] | add')
+
+    # Expected = sum of usage over the 7 unique requestIds in the transcript.
+    assert_eq "$total_prompt"         "368"    "prompt_tokens should dedupe by requestId"
+    assert_eq "$total_completion"     "1867"   "completion_tokens should dedupe by requestId"
+    assert_eq "$total_cache_creation" "21064"  "cache_creation_input_tokens should dedupe by requestId"
+    assert_eq "$total_cache_read"     "165784" "cache_read_input_tokens should dedupe by requestId"
+
+    # Turn merge spans must NOT carry token metrics anymore.
+    local merge_tokens
+    merge_tokens=$(all_spans | jq '[.[] | select(._is_merge == true) | .metrics.prompt_tokens // empty] | length')
+    assert_eq "$merge_tokens" "0" "Turn merges carry no token metrics"
+}
+
+it "LLM span token totals count each requestId once (no per-content-block double-count)" \
+    t_token_dedupe_totals
+
+# ---------------------------------------------------------------------------
+describe "subagent-compact: sub-agent LLM spans"
+# ---------------------------------------------------------------------------
+
+# Real recorded session that launched Explore sub-agents. Each sub-agent made
+# its own model calls and wrote its own transcript, which the recorder
+# snapshotted into transcripts/agent-<id>.jsonl. On replay, post_tool_use.sh
+# (for the Agent tool) must parse those transcripts and emit one LLM span per
+# sub-agent API request, nested under the corresponding Agent tool span.
+#
+# Rather than hard-coding token goldens (which would break every time the
+# fixture is re-recorded), we DERIVE the expected span count and token totals
+# directly from the fixture's own sub-agent transcripts, applying the same
+# rules the production code does: dedupe by requestId, count output_tokens as
+# the MAX per request (it streams cumulatively), and count input/cache once.
+# The test then asserts the replayed spans match that derived expectation.
+SUBAGENT_FIXTURE="$SCRIPT_DIR/fixtures/sessions/subagent-compact"
+
+# Compute expected {spans,output,cache_read,cache_creation} from the fixture's
+# agent-*.jsonl transcripts. Prints a compact JSON object.
+_expected_subagent_totals() {
+    jq -s '
+        [ .[]
+          | select(.type=="assistant")
+          | select(.message.usage != null)
+          | { rid:(.requestId // .message.id),
+              out:(.message.usage.output_tokens // 0),
+              cr:(.message.usage.cache_read_input_tokens // 0),
+              cc:(.message.usage.cache_creation_input_tokens // 0) }
+        ]
+        | group_by(.rid)
+        | { spans: length,
+            output:         (map([.[].out]|max) | add),
+            cache_read:     (map(.[0].cr)       | add),
+            cache_creation: (map(.[0].cc)       | add) }
+    ' "$SUBAGENT_FIXTURE"/transcripts/agent-*.jsonl
+}
+
+t_subagent_llm_spans() {
+    # Skip cleanly if the fixture hasn't been (re-)recorded yet.
+    if ! ls "$SUBAGENT_FIXTURE"/transcripts/agent-*.jsonl >/dev/null 2>&1; then
+        skip "subagent-compact fixture not present; record one to enable this test"
+        return 0
+    fi
+
+    _setup_default_stubs
+    replay_session "$SUBAGENT_FIXTURE" >/dev/null
+
+    local expected
+    expected=$(_expected_subagent_totals)
+    local exp_spans exp_out exp_cr exp_cc
+    exp_spans=$(echo "$expected" | jq '.spans')
+    exp_out=$(echo "$expected" | jq '.output')
+    exp_cr=$(echo "$expected" | jq '.cache_read')
+    exp_cc=$(echo "$expected" | jq '.cache_creation')
+
+    # Collect the sub-agent LLM spans: llm spans whose parent is an Agent
+    # tool span (model-agnostic, since the sub-agent model may differ between
+    # recordings).
+    local agent_ids subagent_spans
+    agent_ids=$(all_spans | jq -c '[.[] | select(.span_attributes.type=="tool" and .span_attributes.name=="Agent") | .span_id]')
+    subagent_spans=$(all_spans | jq --argjson a "$agent_ids" \
+        '[.[] | select(.span_attributes.type=="llm") | select(.span_parents[0] as $p | ($a | index($p)) != null)]')
+
+    # Span count and deduped token totals match what the transcripts imply.
+    assert_eq "$(echo "$subagent_spans" | jq 'length')" "$exp_spans" "sub-agent span count matches transcripts"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.completion_tokens]|add')"           "$exp_out" "sub-agent completion (max per request)"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.cache_read_input_tokens]|add')"     "$exp_cr"  "sub-agent cache_read total"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.cache_creation_input_tokens]|add')" "$exp_cc"  "sub-agent cache_creation total"
+
+    # Sanity: at least one sub-agent span was actually produced.
+    if [ "$exp_spans" -gt 0 ]; then
+        assert_eq "$(echo "$subagent_spans" | jq 'length > 0')" "true" "expected some sub-agent spans"
+    fi
+}
+
+it "emits sub-agent spans under Agent tool spans matching the transcripts" t_subagent_llm_spans

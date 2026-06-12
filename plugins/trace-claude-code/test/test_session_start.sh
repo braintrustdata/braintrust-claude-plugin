@@ -80,6 +80,19 @@ t_session_start_metadata() {
     local session_id
     session_id=$(echo "$span" | jq -r '.metadata.session_id')
     assert_eq "$session_id" "sess-meta"
+
+    # Version attributes are present and non-empty. trace_claude_code_version
+    # comes from plugin.json; claude_code_version from the transcript or
+    # `claude --version` (falls back to "unknown" but must always be set).
+    local trace_version cc_version
+    trace_version=$(echo "$span" | jq -r '.metadata.trace_claude_code_version')
+    cc_version=$(echo "$span" | jq -r '.metadata.claude_code_version')
+    assert_ne "$trace_version" "null" "trace_claude_code_version should be set"
+    assert_ne "$trace_version" "" "trace_claude_code_version should be non-empty"
+    # It should match the manifest (e.g. a semver-ish string).
+    assert_match "$trace_version" "^[0-9]+\.[0-9]+\.[0-9]+" "trace_claude_code_version looks like a version"
+    assert_ne "$cc_version" "null" "claude_code_version should be set"
+    assert_ne "$cc_version" "" "claude_code_version should be non-empty"
 }
 
 t_session_start_writes_state() {
