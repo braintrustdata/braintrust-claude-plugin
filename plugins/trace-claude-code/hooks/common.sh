@@ -258,6 +258,60 @@ get_os() {
     uname -s 2>/dev/null || echo "unknown"
 }
 
+# --- Skill resolution (shared by UserPromptSubmit and PostToolUse) ---
+# Extract a one-line description from a SKILL.md: inline `description:`, a YAML
+# block scalar (`description: |` / `>`), else the first `#`+ heading.
+__bt_skill_desc() {
+    local f="$1" d
+    d=$(awk '
+        /^description:[[:space:]]*[|>]/ { blk=1; next }
+        blk==1 { if ($0 ~ /^[[:space:]]+/) { sub(/^[[:space:]]+/,""); print; exit } else exit }
+        /^description:[[:space:]]*[^|>[:space:]]/ { sub(/^description:[[:space:]]*/,""); print; exit }
+    ' "$f")
+    [ -n "$d" ] || d=$(awk '/^#+[[:space:]]/ { sub(/^#+[[:space:]]+/,""); print; exit }' "$f")
+    printf '%s' "$d" | tr -d '"\r'
+}
+
+# Resolve a skill token (e.g. "my-skill" or "plugin:skill") to its definition.
+# Echoes {name, description, instructions[, source]} JSON on success; nothing if
+# unresolved. Best-effort: callers must guard -- this never aborts on its own.
+# The token is sanitized to [A-Za-z0-9:_-] (no "." or "/"), so it can never be
+# steered to read files outside the standard skill locations.
+__bt_resolve_skill() {
+    local name="$1" cwd="$2" source="${3:-}" subpath leaf base cand plugin sname sdesc sbody
+    name=$(printf '%s' "$name" | sed 's#[^A-Za-z0-9:_-]##g')
+    [ -n "$name" ] || return 0
+    subpath=$(printf '%s' "$name" | tr ':' '/')
+    leaf="${name##*:}"
+    cand=""
+    # 1) user- and project-authored skills (cheap stat, no scan)
+    for base in "$cwd/.claude/skills" "$HOME/.claude/skills"; do
+        [ -n "$base" ] || continue
+        [ -f "$base/$subpath/SKILL.md" ] && { cand="$base/$subpath/SKILL.md"; break; }
+        [ -f "$base/$name/SKILL.md" ] && { cand="$base/$name/SKILL.md"; break; }
+    done
+    # 2) installed plugin skills (cache) -- ONLY for namespaced "plugin:skill" tokens,
+    #    so bare built-in commands (/clear, /model, ...) never trigger a filesystem scan.
+    if [ -z "$cand" ]; then
+        case "$name" in
+            *:*)
+                plugin="${name%%:*}"
+                cand=$(find "$HOME/.claude/plugins/cache" -maxdepth 9 -type f -name SKILL.md -path "*/$plugin/*/$leaf/SKILL.md" 2>/dev/null | head -1)
+                [ -n "$cand" ] || cand=$(find "$HOME/.claude/plugins/cache" -maxdepth 9 -type f -name SKILL.md -path "*/$leaf/SKILL.md" 2>/dev/null | head -1)
+                ;;
+        esac
+    fi
+    [ -n "$cand" ] && [ -f "$cand" ] || return 0
+    sname=$(sed -n 's/^name:[[:space:]]*//p' "$cand" | head -1 | tr -d '"\r')
+    [ -n "$sname" ] || sname="$leaf"
+    sdesc=$(__bt_skill_desc "$cand")
+    sbody=$(awk 'c>=2{print} /^---[[:space:]]*$/{c++}' "$cand" | head -c 6000)
+    [ -n "$sbody" ] || sbody=$(head -c 6000 "$cand")
+    jq -n --arg n "$sname" --arg d "$sdesc" --arg i "$sbody" --arg s "$source" \
+        '{name:$n, description:$d, instructions:$i} + (if $s != "" then {source:$s} else {} end)'
+    return 0
+}
+
 # Capture git diff for the current directory
 capture_git_diff() {
     local cwd="${1:-.}"

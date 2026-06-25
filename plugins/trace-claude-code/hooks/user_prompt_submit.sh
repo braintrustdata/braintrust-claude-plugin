@@ -26,58 +26,16 @@ PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
 # --- Skill invocation capture (best-effort; must never abort the hook) ---
 # If the prompt invokes a slash-command skill (e.g. "/my-skill" or "/plugin:skill"),
 # record the invoked skill's name, description, and instructions (the SKILL.md body)
-# on the turn. Covers user/project skills (~/.claude/skills, <project>/.claude/skills)
-# and installed plugin skills. Built-in commands and skills we can't resolve are
-# silently skipped (invoked_skill is simply not added).
+# on the turn. The resolver (__bt_resolve_skill, in common.sh) is shared with the
+# PostToolUse hook so model-inferred skills are captured the same way. Built-in
+# commands and skills we can't resolve are silently skipped.
 INVOKED_SKILL_JSON=""
-# Extract a one-line description: inline `description:`, YAML block scalar
-# (`description: |` / `>`), else the first `#`+ heading.
-__bt_skill_desc() {
-    local f="$1" d
-    d=$(awk '
-        /^description:[[:space:]]*[|>]/ { blk=1; next }
-        blk==1 { if ($0 ~ /^[[:space:]]+/) { sub(/^[[:space:]]+/,""); print; exit } else exit }
-        /^description:[[:space:]]*[^|>[:space:]]/ { sub(/^description:[[:space:]]*/,""); print; exit }
-    ' "$f")
-    [ -n "$d" ] || d=$(awk '/^#+[[:space:]]/ { sub(/^#+[[:space:]]+/,""); print; exit }' "$f")
-    printf '%s' "$d" | tr -d '"\r'
-}
-__bt_detect_skill() {
-    local prompt="$1" cwd="$2" name subpath base cand leaf plugin sname sdesc sbody
-    name=$(printf '%s' "$prompt" | sed -n 's#^/\([A-Za-z0-9:_-]\{1,\}\).*#\1#p' | head -1)
-    [ -n "$name" ] || return 0
-    subpath=$(printf '%s' "$name" | tr ':' '/')
-    leaf="${name##*:}"
-    cand=""
-    # 1) user- and project-authored skills (cheap stat, no scan)
-    for base in "$cwd/.claude/skills" "$HOME/.claude/skills"; do
-        [ -n "$base" ] || continue
-        [ -f "$base/$subpath/SKILL.md" ] && { cand="$base/$subpath/SKILL.md"; break; }
-        [ -f "$base/$name/SKILL.md" ] && { cand="$base/$name/SKILL.md"; break; }
-    done
-    # 2) installed plugin skills (cache) -- ONLY for namespaced "plugin:skill" tokens,
-    #    so bare built-in commands (/clear, /model, ...) never trigger a filesystem scan.
-    if [ -z "$cand" ]; then
-        case "$name" in
-            *:*)
-                plugin="${name%%:*}"
-                cand=$(find "$HOME/.claude/plugins/cache" -maxdepth 9 -type f -name SKILL.md -path "*/$plugin/*/$leaf/SKILL.md" 2>/dev/null | head -1)
-                [ -n "$cand" ] || cand=$(find "$HOME/.claude/plugins/cache" -maxdepth 9 -type f -name SKILL.md -path "*/$leaf/SKILL.md" 2>/dev/null | head -1)
-                ;;
-        esac
-    fi
-    [ -n "$cand" ] && [ -f "$cand" ] || return 0
-    sname=$(sed -n 's/^name:[[:space:]]*//p' "$cand" | head -1 | tr -d '"\r')
-    [ -n "$sname" ] || sname="$leaf"
-    sdesc=$(__bt_skill_desc "$cand")
-    sbody=$(awk 'c>=2{print} /^---[[:space:]]*$/{c++}' "$cand" | head -c 6000)
-    [ -n "$sbody" ] || sbody=$(head -c 6000 "$cand")
-    jq -n --arg n "$sname" --arg d "$sdesc" --arg i "$sbody" '{name:$n,description:$d,instructions:$i}'
-    return 0
-}
 CWD_FOR_SKILL=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null) || CWD_FOR_SKILL=""
-INVOKED_SKILL_JSON=$(__bt_detect_skill "$PROMPT" "$CWD_FOR_SKILL" 2>/dev/null) || INVOKED_SKILL_JSON=""
-echo "$INVOKED_SKILL_JSON" | jq empty >/dev/null 2>&1 || INVOKED_SKILL_JSON=""
+__BT_PROMPT_SKILL=$(printf '%s' "$PROMPT" | sed -n 's#^/\([A-Za-z0-9:_-]\{1,\}\).*#\1#p' | head -1)
+if [ -n "$__BT_PROMPT_SKILL" ]; then
+    INVOKED_SKILL_JSON=$(__bt_resolve_skill "$__BT_PROMPT_SKILL" "$CWD_FOR_SKILL" "slash_command" 2>/dev/null) || INVOKED_SKILL_JSON=""
+    echo "$INVOKED_SKILL_JSON" | jq empty >/dev/null 2>&1 || INVOKED_SKILL_JSON=""
+fi
 # --- end skill capture ---
 
 # Get session info

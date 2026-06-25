@@ -109,4 +109,28 @@ ROW_ID=$(insert_span "$PROJECT_ID" "$EVENT") || { log "ERROR" "Failed to create 
 
 log "INFO" "Tool: $SPAN_NAME (turn=$TURN_SPAN_ID)"
 
+# --- Model-inferred skill capture (best-effort; must never abort the hook) ---
+# When Claude invokes a skill itself (the "Skill" tool, no leading slash), stamp the
+# same invoked_skill metadata onto the Turn span via a merge write, so skill-efficacy
+# evals and audits see model-selected skills too -- not just user-typed slash commands.
+# Uses the shared resolver in common.sh; source distinguishes the two paths. If a turn
+# has several Skill calls, last-wins on the singular invoked_skill field.
+if [ "$TOOL_NAME" = "Skill" ]; then
+    SKILL_NAME=$(echo "$TOOL_INPUT" | jq -r '.skill // .name // .command // empty' 2>/dev/null) || SKILL_NAME=""
+    if [ -n "$SKILL_NAME" ]; then
+        CWD_FOR_SKILL=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null) || CWD_FOR_SKILL=""
+        INVOKED_SKILL_JSON=$(__bt_resolve_skill "$SKILL_NAME" "$CWD_FOR_SKILL" "model_inferred" 2>/dev/null) || INVOKED_SKILL_JSON=""
+        echo "$INVOKED_SKILL_JSON" | jq empty >/dev/null 2>&1 || INVOKED_SKILL_JSON=""
+        if [ -n "$INVOKED_SKILL_JSON" ]; then
+            TURN_UPDATE=$(jq -n --arg id "$TURN_SPAN_ID" --argjson s "$INVOKED_SKILL_JSON" \
+                '{id: $id, _is_merge: true, metadata: {invoked_skill: $s}}' 2>/dev/null) || TURN_UPDATE=""
+            if [ -n "$TURN_UPDATE" ]; then
+                insert_span "$PROJECT_ID" "$TURN_UPDATE" >/dev/null 2>&1 \
+                    && log "INFO" "Model-inferred skill: $SKILL_NAME (turn=$TURN_SPAN_ID)" || true
+            fi
+        fi
+    fi
+fi
+# --- end model-inferred skill capture ---
+
 exit 0
