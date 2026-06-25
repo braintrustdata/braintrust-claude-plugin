@@ -57,6 +57,20 @@ Instead of running `setup.sh`, you can manually edit `~/.claude/settings.json` o
 }
 ```
 
+#### skill capture
+
+When a skill is invoked — either by a slash command or inferred by the model via the Skill tool — the trace records the skill's name, description, and instructions as `metadata.invoked_skill` on the turn span (with a `source` field indicating which path was used). Capturing the instructions is what enables skill audits and efficacy evals, but it places the skill's text in the trace. To record only the name and description, set:
+
+```json
+{
+  "env": {
+    "BRAINTRUST_CC_CAPTURE_SKILL_INSTRUCTIONS": "false"
+  }
+}
+```
+
+This defaults to `true`.
+
 #### add claude code trace to an existing trace
 
 You can attach a Claude Code session to an existing Braintrust trace by passing `CC_PARENT_SPAN_ID`:

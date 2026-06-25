@@ -305,10 +305,19 @@ __bt_resolve_skill() {
     sname=$(sed -n 's/^name:[[:space:]]*//p' "$cand" | head -1 | tr -d '"\r')
     [ -n "$sname" ] || sname="$leaf"
     sdesc=$(__bt_skill_desc "$cand")
-    sbody=$(awk 'c>=2{print} /^---[[:space:]]*$/{c++}' "$cand" | head -c 6000)
-    [ -n "$sbody" ] || sbody=$(head -c 6000 "$cand")
-    jq -n --arg n "$sname" --arg d "$sdesc" --arg i "$sbody" --arg s "$source" \
-        '{name:$n, description:$d, instructions:$i} + (if $s != "" then {source:$s} else {} end)'
+    # Capturing the SKILL.md body (instructions) is what powers skill audits and
+    # efficacy evals, but it puts the skill's text in the trace. On by default;
+    # set BRAINTRUST_CC_CAPTURE_SKILL_INSTRUCTIONS=false (or 0/no/off) to record
+    # only name + description for stricter environments.
+    if is_truthy "${BRAINTRUST_CC_CAPTURE_SKILL_INSTRUCTIONS:-true}"; then
+        sbody=$(awk 'c>=2{print} /^---[[:space:]]*$/{c++}' "$cand" | head -c 6000)
+        [ -n "$sbody" ] || sbody=$(head -c 6000 "$cand")
+        jq -n --arg n "$sname" --arg d "$sdesc" --arg i "$sbody" --arg s "$source" \
+            '{name:$n, description:$d, instructions:$i} + (if $s != "" then {source:$s} else {} end)'
+    else
+        jq -n --arg n "$sname" --arg d "$sdesc" --arg s "$source" \
+            '{name:$n, description:$d} + (if $s != "" then {source:$s} else {} end)'
+    fi
     return 0
 }
 
