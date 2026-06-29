@@ -84,7 +84,15 @@ claude --settings '{"env":{"CC_PARENT_SPAN_ID":"parent-span-id","CC_ROOT_SPAN_ID
 The plugin derives token usage from the conversation transcript that Claude Code
 writes. For every model request that appears in the transcript — the main
 conversation and sub-agents alike — the traced token counts match Claude Code's
-own `/usage` exactly (input, output, cache read, and cache write).
+own `/usage` exactly and are emitted with Braintrust's canonical metric names.
+
+For Anthropic usage, `prompt_tokens` is inclusive: Claude Code's
+`input_tokens` plus cache-read tokens plus cache-write tokens. Cache reads are
+also emitted as `prompt_cached_tokens`. Cache writes are emitted as
+`prompt_cache_creation_5m_tokens` / `prompt_cache_creation_1h_tokens` when
+Claude Code includes the Anthropic TTL breakdown, or as
+`prompt_cache_creation_tokens` when only the legacy aggregate is present. This
+is the shape Braintrust's backend uses to compute cost.
 
 There is one known and unavoidable exception: **Claude Code's internal background
 model calls** (most notably the automatic **session-title generation**, and

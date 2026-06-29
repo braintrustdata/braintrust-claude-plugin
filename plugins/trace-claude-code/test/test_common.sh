@@ -332,10 +332,14 @@ t_emit_dedupes_by_request_id() {
     assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="tool")]|length' "$out")" "1" "one tool span"
 
     # Output is the MAX per request: A=30 (not 5), B=20 -> 50.
-    # cache_read 2000 + 2500 = 4500, prompt 5 + 2 = 7 (constant per request).
-    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.completion_tokens]|add' "$out")"        "50"   "completion uses max per request"
-    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_tokens]|add' "$out")"           "7"    "prompt deduped"
-    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.cache_read_input_tokens]|add' "$out")" "4500" "cache_read deduped"
+    # Braintrust prompt_tokens are inclusive for Anthropic:
+    # input 7 + cache_read 4500 + cache_creation 103 = 4610.
+    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.completion_tokens]|add' "$out")"             "50"   "completion uses max per request"
+    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_tokens]|add' "$out")"                "4610" "prompt includes input and cache tokens"
+    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.tokens]|add' "$out")"                       "4660" "total tokens includes inclusive prompt and completion"
+    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_cached_tokens]|add' "$out")"         "4500" "cache_read deduped"
+    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_cache_creation_tokens]|add' "$out")" "103"  "cache_creation deduped"
+    assert_eq "$(jq -s '[.[]|select(.span_attributes.type=="llm" and (.metrics | (has("cache_read_input_tokens") or has("cache_creation_input_tokens"))))]|length' "$out")" "0" "raw Anthropic cache metrics are not emitted"
 
     # All spans parented under PARENT.
     assert_eq "$(jq -s 'all(.[]; .span_parents[0] == "PARENT")' "$out")" "true" "all parented under PARENT"

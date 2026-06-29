@@ -249,17 +249,21 @@ t_token_dedupe_totals() {
     local llms
     llms=$(all_spans | jq '[.[] | select(.span_attributes.type == "llm")]')
 
-    local total_prompt total_completion total_cache_creation total_cache_read
+    local total_prompt total_completion total_cache_creation total_cache_read total_tokens raw_metric_count
     total_prompt=$(echo "$llms" | jq '[.[].metrics.prompt_tokens // 0] | add')
     total_completion=$(echo "$llms" | jq '[.[].metrics.completion_tokens // 0] | add')
-    total_cache_creation=$(echo "$llms" | jq '[.[].metrics.cache_creation_input_tokens // 0] | add')
-    total_cache_read=$(echo "$llms" | jq '[.[].metrics.cache_read_input_tokens // 0] | add')
+    total_cache_creation=$(echo "$llms" | jq '[.[].metrics.prompt_cache_creation_tokens // 0, .[].metrics.prompt_cache_creation_5m_tokens // 0, .[].metrics.prompt_cache_creation_1h_tokens // 0] | add')
+    total_cache_read=$(echo "$llms" | jq '[.[].metrics.prompt_cached_tokens // 0] | add')
+    total_tokens=$(echo "$llms" | jq '[.[].metrics.tokens // 0] | add')
+    raw_metric_count=$(echo "$llms" | jq '[.[] | select(.metrics | (has("cache_creation_input_tokens") or has("cache_read_input_tokens")))] | length')
 
     # Expected = sum of usage over the 7 unique requestIds in the transcript.
-    assert_eq "$total_prompt"         "368"    "prompt_tokens should dedupe by requestId"
+    assert_eq "$total_prompt"         "187216" "prompt_tokens should include input and cache tokens deduped by requestId"
     assert_eq "$total_completion"     "1867"   "completion_tokens should dedupe by requestId"
-    assert_eq "$total_cache_creation" "21064"  "cache_creation_input_tokens should dedupe by requestId"
-    assert_eq "$total_cache_read"     "165784" "cache_read_input_tokens should dedupe by requestId"
+    assert_eq "$total_cache_creation" "21064"  "prompt cache creation tokens should dedupe by requestId"
+    assert_eq "$total_cache_read"     "165784" "prompt_cached_tokens should dedupe by requestId"
+    assert_eq "$total_tokens"         "189083" "tokens should include inclusive prompt and completion"
+    assert_eq "$raw_metric_count"     "0"      "raw Anthropic cache metrics should not be emitted"
 
     # Turn merge spans must NOT carry token metrics anymore.
     local merge_tokens
@@ -288,7 +292,7 @@ describe "subagent-compact: sub-agent LLM spans"
 # The test then asserts the replayed spans match that derived expectation.
 SUBAGENT_FIXTURE="$SCRIPT_DIR/fixtures/sessions/subagent-compact"
 
-# Compute expected {spans,output,cache_read,cache_creation} from the fixture's
+# Compute expected {spans,input,output,cache_read,cache_creation} from the fixture's
 # agent-*.jsonl transcripts. Prints a compact JSON object.
 _expected_subagent_totals() {
     jq -s '
@@ -296,12 +300,14 @@ _expected_subagent_totals() {
           | select(.type=="assistant")
           | select(.message.usage != null)
           | { rid:(.requestId // .message.id),
+              in:(.message.usage.input_tokens // 0),
               out:(.message.usage.output_tokens // 0),
               cr:(.message.usage.cache_read_input_tokens // 0),
               cc:(.message.usage.cache_creation_input_tokens // 0) }
         ]
         | group_by(.rid)
         | { spans: length,
+            input:          (map(.[0].in)       | add),
             output:         (map([.[].out]|max) | add),
             cache_read:     (map(.[0].cr)       | add),
             cache_creation: (map(.[0].cc)       | add) }
@@ -320,11 +326,14 @@ t_subagent_llm_spans() {
 
     local expected
     expected=$(_expected_subagent_totals)
-    local exp_spans exp_out exp_cr exp_cc
+    local exp_spans exp_in exp_out exp_cr exp_cc exp_prompt exp_tokens
     exp_spans=$(echo "$expected" | jq '.spans')
+    exp_in=$(echo "$expected" | jq '.input')
     exp_out=$(echo "$expected" | jq '.output')
     exp_cr=$(echo "$expected" | jq '.cache_read')
     exp_cc=$(echo "$expected" | jq '.cache_creation')
+    exp_prompt=$((exp_in + exp_cr + exp_cc))
+    exp_tokens=$((exp_prompt + exp_out))
 
     # Collect the sub-agent LLM spans: llm spans whose parent is an Agent
     # tool span (model-agnostic, since the sub-agent model may differ between
@@ -336,9 +345,12 @@ t_subagent_llm_spans() {
 
     # Span count and deduped token totals match what the transcripts imply.
     assert_eq "$(echo "$subagent_spans" | jq 'length')" "$exp_spans" "sub-agent span count matches transcripts"
-    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.completion_tokens]|add')"           "$exp_out" "sub-agent completion (max per request)"
-    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.cache_read_input_tokens]|add')"     "$exp_cr"  "sub-agent cache_read total"
-    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.cache_creation_input_tokens]|add')" "$exp_cc"  "sub-agent cache_creation total"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.completion_tokens]|add')" "$exp_out" "sub-agent completion (max per request)"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.prompt_tokens]|add')"     "$exp_prompt" "sub-agent prompt includes input and cache tokens"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.tokens]|add')"            "$exp_tokens" "sub-agent total tokens"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.prompt_cached_tokens]|add')" "$exp_cr"  "sub-agent cache_read total"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[].metrics.prompt_cache_creation_tokens // 0, .[].metrics.prompt_cache_creation_5m_tokens // 0, .[].metrics.prompt_cache_creation_1h_tokens // 0] | add')" "$exp_cc" "sub-agent cache_creation total"
+    assert_eq "$(echo "$subagent_spans" | jq '[.[] | select(.metrics | (has("cache_creation_input_tokens") or has("cache_read_input_tokens")))] | length')" "0" "sub-agent raw Anthropic cache metrics absent"
 
     # Sanity: at least one sub-agent span was actually produced.
     if [ "$exp_spans" -gt 0 ]; then

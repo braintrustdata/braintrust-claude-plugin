@@ -141,7 +141,10 @@ t_stop_merge_has_end_time_no_tokens() {
     assert_eq "$(echo "$span" | jq -r '.metrics.prompt_tokens // "absent"')"     "absent" "no prompt_tokens on Turn merge"
     assert_eq "$(echo "$span" | jq -r '.metrics.completion_tokens // "absent"')" "absent" "no completion_tokens on Turn merge"
     assert_eq "$(echo "$span" | jq -r '.metrics.tokens // "absent"')"            "absent" "no tokens on Turn merge"
-    assert_eq "$(echo "$span" | jq -r '.metrics.cache_read_input_tokens // "absent"')" "absent" "no cache_read on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.prompt_cached_tokens // "absent"')" "absent" "no cache_read on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.prompt_cache_creation_tokens // "absent"')" "absent" "no cache_creation on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.prompt_cache_creation_5m_tokens // "absent"')" "absent" "no cache_creation_5m on Turn merge"
+    assert_eq "$(echo "$span" | jq -r '.metrics.prompt_cache_creation_1h_tokens // "absent"')" "absent" "no cache_creation_1h on Turn merge"
 }
 
 # ---------------------------------------------------------------------------
@@ -301,8 +304,10 @@ t_stop_same_request_not_split_into_zero_token_spans() {
         .[] | select(
             (.metrics.prompt_tokens // 0) == 0
             and (.metrics.completion_tokens // 0) == 0
-            and (.metrics.cache_creation_input_tokens // 0) == 0
-            and (.metrics.cache_read_input_tokens // 0) == 0
+            and (.metrics.prompt_cache_creation_tokens // 0) == 0
+            and (.metrics.prompt_cache_creation_5m_tokens // 0) == 0
+            and (.metrics.prompt_cache_creation_1h_tokens // 0) == 0
+            and (.metrics.prompt_cached_tokens // 0) == 0
         )
     ] | length')
     assert_eq "$zero_token_spans" "0" "no LLM span should carry all-zero token metrics"
@@ -320,6 +325,46 @@ t_stop_same_request_not_split_into_zero_token_spans() {
     assert_eq "$total_completion" "35" "total completion_tokens preserved across spans"
 }
 
+t_stop_emits_split_cache_metrics() {
+    _with_turn_started "stop-cache-split-1"
+
+    local transcript="$TEST_TMP/transcript.jsonl"
+    jq -nc '{
+        type: "assistant",
+        requestId: "req_cache",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        message: {
+            model: "claude-test",
+            content: [{type: "text", text: "cached answer"}],
+            usage: {
+                input_tokens: 7,
+                cache_creation_input_tokens: 30,
+                cache_read_input_tokens: 100,
+                cache_creation: {
+                    ephemeral_5m_input_tokens: 10,
+                    ephemeral_1h_input_tokens: 20
+                },
+                output_tokens: 5
+            }
+        }
+    }' > "$transcript"
+
+    run_hook stop_hook.sh "$(fixture_stop "stop-cache-split-1" "$transcript" "cached answer")"
+    assert_success "$HOOK_STATUS"
+
+    local llm
+    llm=$(all_spans | jq '[.[] | select(.span_attributes.type == "llm")][0]')
+
+    assert_eq "$(echo "$llm" | jq -r '.metrics.prompt_tokens')" "137" "prompt includes input, cache read, and cache write"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.tokens')" "142" "tokens includes inclusive prompt and completion"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.prompt_cached_tokens')" "100" "cache read uses canonical metric"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.prompt_cache_creation_5m_tokens')" "10" "5m cache write uses canonical metric"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.prompt_cache_creation_1h_tokens')" "20" "1h cache write uses canonical metric"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.prompt_cache_creation_tokens // "absent"')" "absent" "aggregate cache write omitted when split is present"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.cache_creation_input_tokens // "absent"')" "absent" "raw cache creation omitted"
+    assert_eq "$(echo "$llm" | jq -r '.metrics.cache_read_input_tokens // "absent"')" "absent" "raw cache read omitted"
+}
+
 it "writes last_assistant_message into the Turn span output"  t_stop_sets_turn_output
 it "leaves output empty when last_assistant_message missing"  t_stop_output_empty_when_message_missing
 it "targets the existing Turn span id via merge"              t_stop_turn_update_has_correct_id
@@ -327,3 +372,4 @@ it "sets _is_merge=true on the update"                        t_stop_merge_flag_
 it "merge carries end time but no token metrics"              t_stop_merge_has_end_time_no_tokens
 it "does not double-count streaming output across 3+ lines"   t_stop_streaming_output_not_double_counted
 it "emits one LLM span per requestId across tool_result splits" t_stop_same_request_not_split_into_zero_token_spans
+it "emits canonical split cache metrics"                      t_stop_emits_split_cache_metrics

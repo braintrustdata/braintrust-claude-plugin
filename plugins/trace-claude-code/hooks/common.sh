@@ -991,6 +991,9 @@ emit_llm_spans_from_transcript() {
               input_tokens:          ([ .[].message.usage.input_tokens // 0 ]                | max),
               output_tokens:         ([ .[].message.usage.output_tokens // 0 ]               | max),
               cache_creation_tokens: ([ .[].message.usage.cache_creation_input_tokens // 0 ] | max),
+              cache_creation_5m_tokens: ([ .[].message.usage.cache_creation.ephemeral_5m_input_tokens // 0 ] | max),
+              cache_creation_1h_tokens: ([ .[].message.usage.cache_creation.ephemeral_1h_input_tokens // 0 ] | max),
+              cache_creation_has_split: any(.[]; (((.message.usage.cache_creation.ephemeral_5m_input_tokens // 0) + (.message.usage.cache_creation.ephemeral_1h_input_tokens // 0)) > 0)),
               cache_read_tokens:     ([ .[].message.usage.cache_read_input_tokens // 0 ]     | max),
               text: ( [ .[].message.content
                         | if type=="array" then [ .[]|select(.type=="text")|.text ]|join("\n")
@@ -1043,6 +1046,9 @@ emit_llm_spans_from_transcript() {
                   input_tokens: $call.input_tokens,
                   output_tokens: $call.output_tokens,
                   cache_creation_tokens: $call.cache_creation_tokens,
+                  cache_creation_5m_tokens: $call.cache_creation_5m_tokens,
+                  cache_creation_1h_tokens: $call.cache_creation_1h_tokens,
+                  cache_creation_has_split: $call.cache_creation_has_split,
                   cache_read_tokens: $call.cache_read_tokens,
                   input: .history,
                   output: $assistant_msg
@@ -1103,14 +1109,43 @@ emit_llm_spans_from_transcript() {
                     created: (.ts // (now|todate)),
                     input: .input,
                     output: .output,
-                    metrics: {
+                    metrics: ({
                         start: $epoch, end: $epoch,
-                        prompt_tokens: .input_tokens,
+                        prompt_tokens: (
+                            .input_tokens
+                            + .cache_read_tokens
+                            + (
+                                if .cache_creation_has_split then
+                                    (.cache_creation_5m_tokens + .cache_creation_1h_tokens)
+                                else
+                                    .cache_creation_tokens
+                                end
+                            )
+                        ),
                         completion_tokens: .output_tokens,
-                        tokens: (.input_tokens + .output_tokens),
-                        cache_creation_input_tokens: .cache_creation_tokens,
-                        cache_read_input_tokens: .cache_read_tokens
-                    },
+                        tokens: (
+                            .input_tokens
+                            + .cache_read_tokens
+                            + (
+                                if .cache_creation_has_split then
+                                    (.cache_creation_5m_tokens + .cache_creation_1h_tokens)
+                                else
+                                    .cache_creation_tokens
+                                end
+                            )
+                            + .output_tokens
+                        ),
+                        prompt_cached_tokens: .cache_read_tokens
+                    } + (
+                        if .cache_creation_has_split then
+                            {
+                                prompt_cache_creation_5m_tokens: .cache_creation_5m_tokens,
+                                prompt_cache_creation_1h_tokens: .cache_creation_1h_tokens
+                            }
+                        else
+                            {prompt_cache_creation_tokens: .cache_creation_tokens}
+                        end
+                    )),
                     metadata: { model: .model },
                     span_attributes: { name: .model, type: "llm" }
                 }')

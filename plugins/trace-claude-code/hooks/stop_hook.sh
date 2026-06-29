@@ -102,6 +102,9 @@ CURRENT_MODEL=""
 CURRENT_PROMPT_TOKENS=0
 CURRENT_COMPLETION_TOKENS=0
 CURRENT_CACHE_CREATION_TOKENS=0
+CURRENT_CACHE_CREATION_5M_TOKENS=0
+CURRENT_CACHE_CREATION_1H_TOKENS=0
+CURRENT_CACHE_CREATION_MISSING_SPLIT=false
 CURRENT_CACHE_READ_TOKENS=0
 CURRENT_START_TIMESTAMP=""  # ISO timestamp when this LLM call started
 CURRENT_END_TIMESTAMP=""    # ISO timestamp when this LLM call ended
@@ -164,12 +167,28 @@ create_llm_span() {
     local input_history="$8"  # JSON array of conversation history
     local cache_creation_tokens="${9:-0}"
     local cache_read_tokens="${10:-0}"
+    local cache_creation_5m_tokens="${11:-0}"
+    local cache_creation_1h_tokens="${12:-0}"
+    local cache_creation_missing_split="${13:-false}"
 
     # Need either text or tool_calls
     [ -z "$output_text" ] && [ "$tool_calls_json" = "[]" ] && return
 
     local span_id=$(generate_uuid)
-    local total_tokens=$((prompt_tokens + completion_tokens))
+    local use_cache_creation_split=false
+    if [ "$cache_creation_missing_split" != "true" ]; then
+        if [ "$cache_creation_5m_tokens" -gt 0 ] 2>/dev/null \
+            || [ "$cache_creation_1h_tokens" -gt 0 ] 2>/dev/null; then
+            use_cache_creation_split=true
+        fi
+    fi
+
+    local effective_cache_creation_tokens="$cache_creation_tokens"
+    if [ "$use_cache_creation_split" = "true" ]; then
+        effective_cache_creation_tokens=$((cache_creation_5m_tokens + cache_creation_1h_tokens))
+    fi
+    local bt_prompt_tokens=$((prompt_tokens + cache_read_tokens + effective_cache_creation_tokens))
+    local total_tokens=$((bt_prompt_tokens + completion_tokens))
     local start_time=$(_iso_to_epoch "$start_ts")
     local end_time=$(_iso_to_epoch "$end_ts")
 
@@ -198,10 +217,14 @@ create_llm_span() {
         --argjson output "$output_json" \
         --arg model "${model:-claude}" \
         --argjson prompt_tokens "$prompt_tokens" \
+        --argjson bt_prompt_tokens "$bt_prompt_tokens" \
         --argjson completion_tokens "$completion_tokens" \
         --argjson tokens "$total_tokens" \
         --argjson cache_creation_tokens "$cache_creation_tokens" \
         --argjson cache_read_tokens "$cache_read_tokens" \
+        --argjson cache_creation_5m_tokens "$cache_creation_5m_tokens" \
+        --argjson cache_creation_1h_tokens "$cache_creation_1h_tokens" \
+        --argjson use_cache_creation_split "$use_cache_creation_split" \
         --argjson start_time "$start_time" \
         --argjson end_time "$end_time" \
         '{
@@ -212,15 +235,23 @@ create_llm_span() {
             created: $created,
             input: $input,
             output: $output,
-            metrics: {
+            metrics: ({
                 start: $start_time,
                 end: $end_time,
-                prompt_tokens: $prompt_tokens,
+                prompt_tokens: $bt_prompt_tokens,
                 completion_tokens: $completion_tokens,
                 tokens: $tokens,
-                cache_creation_input_tokens: $cache_creation_tokens,
-                cache_read_input_tokens: $cache_read_tokens
-            },
+                prompt_cached_tokens: $cache_read_tokens
+            } + (
+                if $use_cache_creation_split then
+                    {
+                        prompt_cache_creation_5m_tokens: $cache_creation_5m_tokens,
+                        prompt_cache_creation_1h_tokens: $cache_creation_1h_tokens
+                    }
+                else
+                    {prompt_cache_creation_tokens: $cache_creation_tokens}
+                end
+            )),
             metadata: {
                 model: $model
             },
@@ -258,8 +289,10 @@ flush_pending_llm() {
     if [ "$CURRENT_PROMPT_TOKENS" -gt 0 ] 2>/dev/null \
         || [ "$CURRENT_COMPLETION_TOKENS" -gt 0 ] 2>/dev/null \
         || [ "$CURRENT_CACHE_CREATION_TOKENS" -gt 0 ] 2>/dev/null \
+        || [ "$CURRENT_CACHE_CREATION_5M_TOKENS" -gt 0 ] 2>/dev/null \
+        || [ "$CURRENT_CACHE_CREATION_1H_TOKENS" -gt 0 ] 2>/dev/null \
         || [ "$CURRENT_CACHE_READ_TOKENS" -gt 0 ] 2>/dev/null; then
-        create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS"
+        create_llm_span "$CURRENT_OUTPUT_TEXT" "$CURRENT_MODEL" "$CURRENT_PROMPT_TOKENS" "$CURRENT_COMPLETION_TOKENS" "$CURRENT_START_TIMESTAMP" "$CURRENT_END_TIMESTAMP" "$CURRENT_TOOL_CALLS" "$CONVERSATION_HISTORY" "$CURRENT_CACHE_CREATION_TOKENS" "$CURRENT_CACHE_READ_TOKENS" "$CURRENT_CACHE_CREATION_5M_TOKENS" "$CURRENT_CACHE_CREATION_1H_TOKENS" "$CURRENT_CACHE_CREATION_MISSING_SPLIT"
     fi
 
     # Always thread the assistant turn into history, whether or not a span
@@ -302,6 +335,9 @@ while IFS= read -r line; do
             CURRENT_PROMPT_TOKENS=0
             CURRENT_COMPLETION_TOKENS=0
             CURRENT_CACHE_CREATION_TOKENS=0
+            CURRENT_CACHE_CREATION_5M_TOKENS=0
+            CURRENT_CACHE_CREATION_1H_TOKENS=0
+            CURRENT_CACHE_CREATION_MISSING_SPLIT=false
             CURRENT_CACHE_READ_TOKENS=0
             CURRENT_START_TIMESTAMP=""  # Will be set from first assistant message
             CURRENT_END_TIMESTAMP=""
@@ -319,6 +355,9 @@ while IFS= read -r line; do
             CURRENT_PROMPT_TOKENS=0
             CURRENT_COMPLETION_TOKENS=0
             CURRENT_CACHE_CREATION_TOKENS=0
+            CURRENT_CACHE_CREATION_5M_TOKENS=0
+            CURRENT_CACHE_CREATION_1H_TOKENS=0
+            CURRENT_CACHE_CREATION_MISSING_SPLIT=false
             CURRENT_CACHE_READ_TOKENS=0
             CURRENT_START_TIMESTAMP="$MSG_TIMESTAMP"
             CURRENT_END_TIMESTAMP=""
@@ -392,10 +431,16 @@ while IFS= read -r line; do
             OUTPUT_TOKENS=$(echo "$USAGE" | jq -r '.output_tokens // 0' 2>/dev/null)
             CACHE_CREATION=$(echo "$USAGE" | jq -r '.cache_creation_input_tokens // 0' 2>/dev/null)
             CACHE_READ=$(echo "$USAGE" | jq -r '.cache_read_input_tokens // 0' 2>/dev/null)
+            CACHE_CREATION_5M=$(echo "$USAGE" | jq -r '.cache_creation.ephemeral_5m_input_tokens // 0' 2>/dev/null)
+            CACHE_CREATION_1H=$(echo "$USAGE" | jq -r '.cache_creation.ephemeral_1h_input_tokens // 0' 2>/dev/null)
+            HAS_CACHE_CREATION_SPLIT=$(echo "$USAGE" | jq -r 'if ((.cache_creation? // null) | type) == "object" then "true" else "false" end' 2>/dev/null)
             [ "$INPUT_TOKENS" = "null" ] && INPUT_TOKENS=0
             [ "$OUTPUT_TOKENS" = "null" ] && OUTPUT_TOKENS=0
             [ "$CACHE_CREATION" = "null" ] && CACHE_CREATION=0
             [ "$CACHE_READ" = "null" ] && CACHE_READ=0
+            [ "$CACHE_CREATION_5M" = "null" ] && CACHE_CREATION_5M=0
+            [ "$CACHE_CREATION_1H" = "null" ] && CACHE_CREATION_1H=0
+            [ "$HAS_CACHE_CREATION_SPLIT" = "null" ] && HAS_CACHE_CREATION_SPLIT=false
 
             # Determine whether input/cache for this requestId were already
             # counted, and fetch the prior max output for delta accounting.
@@ -420,6 +465,11 @@ while IFS= read -r line; do
                 [ "$INPUT_TOKENS" -gt 0 ] 2>/dev/null && CURRENT_PROMPT_TOKENS=$((CURRENT_PROMPT_TOKENS + INPUT_TOKENS))
                 [ "$CACHE_CREATION" -gt 0 ] 2>/dev/null && CURRENT_CACHE_CREATION_TOKENS=$((CURRENT_CACHE_CREATION_TOKENS + CACHE_CREATION))
                 [ "$CACHE_READ" -gt 0 ] 2>/dev/null && CURRENT_CACHE_READ_TOKENS=$((CURRENT_CACHE_READ_TOKENS + CACHE_READ))
+                [ "$CACHE_CREATION_5M" -gt 0 ] 2>/dev/null && CURRENT_CACHE_CREATION_5M_TOKENS=$((CURRENT_CACHE_CREATION_5M_TOKENS + CACHE_CREATION_5M))
+                [ "$CACHE_CREATION_1H" -gt 0 ] 2>/dev/null && CURRENT_CACHE_CREATION_1H_TOKENS=$((CURRENT_CACHE_CREATION_1H_TOKENS + CACHE_CREATION_1H))
+                if [ "$CACHE_CREATION" -gt 0 ] 2>/dev/null && [ "$HAS_CACHE_CREATION_SPLIT" != "true" ]; then
+                    CURRENT_CACHE_CREATION_MISSING_SPLIT=true
+                fi
             fi
 
             # Output: add only the increase over this requestId's prior max,
