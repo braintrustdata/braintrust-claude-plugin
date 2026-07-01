@@ -234,9 +234,14 @@ t_agent_emits_subagent_llm_spans() {
         '[.[]|select(.span_attributes.type=="tool" and .span_parents[0]==$p)][0]')
     assert_eq "$(echo "$subagent_tool" | jq -r '.span_attributes.name')" "Terminal: ls -la" "sub-agent tool span named after the Bash command"
 
-    # Token totals match the deduped transcript (completion 40+20, cache_read 1000+1500).
-    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.completion_tokens]|add')" "60"   "completion summed"
-    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.cache_read_input_tokens]|add')" "2500" "cache_read summed"
+    # Token totals match the deduped transcript. Braintrust prompt_tokens are
+    # inclusive for Anthropic: input 8 + cache_read 2500 + cache_creation 15 = 2523.
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.completion_tokens]|add')"             "60"   "completion summed"
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_tokens]|add')"                "2523" "prompt includes input and cache tokens"
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.tokens]|add')"                       "2583" "total tokens includes inclusive prompt and completion"
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_cached_tokens]|add')"         "2500" "cache_read summed"
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")|.metrics.prompt_cache_creation_tokens]|add')" "15"   "cache_creation summed"
+    assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm" and (.metrics | (has("cache_read_input_tokens") or has("cache_creation_input_tokens"))))]|length')" "0" "raw Anthropic cache metrics are not emitted"
 
     # The LLM spans are tagged with the sub-agent's model.
     assert_eq "$(all_spans | jq '[.[]|select(.span_attributes.type=="llm")]|all(.span_attributes.name=="claude-haiku-4-5")')" "true" "sub-agent model tagged"
