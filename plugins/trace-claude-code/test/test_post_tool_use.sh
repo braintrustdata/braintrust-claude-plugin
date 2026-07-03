@@ -90,6 +90,22 @@ t_read_tool_span_name_includes_basename() {
     assert_eq "$name" "Read: file.txt"
 }
 
+t_skill_tool_span_is_normalized() {
+    _with_turn_started "sess-pt-skill"
+
+    run_hook post_tool_use.sh "$(fixture_post_tool_use "sess-pt-skill" "Skill" \
+        "$(jq -nc '{name: "review"}')" \
+        "$(fixture_tool_response_text 'loaded')")"
+
+    local tool_span name
+    tool_span=$(span_by_type "tool")
+    name=$(echo "$tool_span" | jq -r '.span_attributes.name')
+    assert_eq "$name" "skill: review"
+    assert_eq "$(echo "$tool_span" | jq -r '.metadata.tool_name')" "skill"
+    assert_eq "$(echo "$tool_span" | jq -r '.metadata.original_tool_name')" "Skill"
+    assert_eq "$(echo "$tool_span" | jq -r '.metadata.skill_name')" "review"
+}
+
 t_multiple_tools_in_turn() {
     _with_turn_started "sess-pt-multi"
 
@@ -113,6 +129,7 @@ t_multiple_tools_in_turn() {
 it "creates a tool span on PostToolUse"             t_post_tool_creates_tool_span
 it "tool span is a child of the current Turn span"  t_tool_span_is_child_of_turn
 it "Read tool span name includes file basename"     t_read_tool_span_name_includes_basename
+it "Skill tool span is normalized as skill load"    t_skill_tool_span_is_normalized
 it "all tools in a turn produce distinct spans"     t_multiple_tools_in_turn
 
 # ---------------------------------------------------------------------------
