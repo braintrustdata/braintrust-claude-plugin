@@ -521,6 +521,7 @@ enqueue_span "$SESSION_ID" "$PROJECT_ID" "$TURN_UPDATE" || true
 # Update state
 set_session_state "$SESSION_ID" "turn_last_line" "$TOTAL_LINES"
 set_session_state "$SESSION_ID" "current_turn_span_id" ""
+set_session_state "$SESSION_ID" "current_turn_explicit_skill_names" "[]"
 
 [ "$LLM_CALLS_CREATED" -gt 0 ] && log "INFO" "Created $LLM_CALLS_CREATED LLM spans for turn"
 log "INFO" "Turn finalized (end=$END_TIME)"

@@ -105,6 +105,9 @@ TURN_SPAN_ID=$(generate_uuid)
 TIMESTAMP=$(get_timestamp)
 START_TIME=$(date +%s)
 
+EXPLICIT_SKILL_NAMES=$(get_session_state "$SESSION_ID" "current_turn_explicit_skill_names")
+[ -z "$EXPLICIT_SKILL_NAMES" ] && EXPLICIT_SKILL_NAMES="[]"
+
 # Truncate prompt for display (first 100 chars)
 PROMPT_PREVIEW="${PROMPT:0:100}"
 [ ${#PROMPT} -gt 100 ] && PROMPT_PREVIEW="${PROMPT_PREVIEW}..."
@@ -117,6 +120,7 @@ EVENT=$(jq -n \
     --arg session_span_id "$SESSION_SPAN_ID" \
     --arg created "$TIMESTAMP" \
     --arg prompt "$PROMPT" \
+    --argjson explicit_skill_names "$EXPLICIT_SKILL_NAMES" \
     --argjson turn "$TURN_COUNT" \
     --argjson start_time "$START_TIME" \
     '{
@@ -129,6 +133,10 @@ EVENT=$(jq -n \
         metrics: {
             start: $start_time
         },
+        metadata: (if ($explicit_skill_names | length) > 0 then {
+            loaded_skill_names: $explicit_skill_names,
+            loaded_skills: ($explicit_skill_names | map({name: .}))
+        } else {} end),
         span_attributes: {
             name: ("Turn " + ($turn | tostring)),
             type: "task"
