@@ -53,6 +53,7 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
     TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
     PLUGIN_VERSION=$(get_plugin_version)
     CLAUDE_CODE_VERSION=$(get_claude_code_version "$TRANSCRIPT_PATH")
+    GIT_METADATA=$(git_metadata_json "$CWD")
 
     EVENT=$(jq -n \
         --arg id "$ROOT_SPAN_ID" \
@@ -66,13 +67,14 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
         --arg os "$OS" \
         --arg plugin_version "$PLUGIN_VERSION" \
         --arg claude_code_version "$CLAUDE_CODE_VERSION" \
+        --argjson git_metadata "$GIT_METADATA" \
         '{
             id: $id,
             span_id: $span_id,
             root_span_id: $root_span_id,
             created: $created,
             input: ("Session: " + $workspace),
-            metadata: {
+            metadata: ({
                 session_id: $session,
                 workspace: $workspace,
                 hostname: $hostname,
@@ -81,7 +83,7 @@ if [ -z "$ROOT_SPAN_ID" ] || [ -z "$PROJECT_ID" ]; then
                 source: "claude-code",
                 trace_claude_code_version: $plugin_version,
                 claude_code_version: $claude_code_version
-            },
+            } + $git_metadata),
             span_attributes: {
                 name: ("Claude Code: " + $workspace),
                 type: "task"

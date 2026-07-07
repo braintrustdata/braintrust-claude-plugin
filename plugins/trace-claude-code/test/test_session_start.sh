@@ -95,6 +95,39 @@ t_session_start_metadata() {
     assert_ne "$cc_version" "" "claude_code_version should be non-empty"
 }
 
+_make_git_repo() {
+    local dir
+    dir=$(mktemp -d)
+    git -C "$dir" init >/dev/null 2>&1
+    git -C "$dir" config user.email test@example.com
+    git -C "$dir" config user.name "Test User"
+    printf "hello\n" > "$dir/README.md"
+    git -C "$dir" add README.md
+    git -C "$dir" commit -m init >/dev/null 2>&1
+    git -C "$dir" branch -M main
+    git -C "$dir" remote add origin "https://token@github.com/acme/app.git"
+    echo "$dir"
+}
+
+t_session_start_git_metadata() {
+    _setup_default_stubs
+
+    local repo commit
+    repo=$(_make_git_repo)
+    commit=$(git -C "$repo" rev-parse HEAD)
+
+    run_hook session_start.sh "$(fixture_session_start "sess-git" "$repo")"
+
+    local span
+    span=$(span_by_type "task")
+
+    assert_eq "$(echo "$span" | jq -r '.metadata.git_origin_url')" "https://github.com/acme/app.git"
+    assert_eq "$(echo "$span" | jq -r '.metadata.git_branch')" "main"
+    assert_eq "$(echo "$span" | jq -r '.metadata.git_commit_sha')" "$commit"
+
+    rm -rf "$repo"
+}
+
 t_session_start_writes_state() {
     _setup_default_stubs
 
@@ -117,6 +150,7 @@ t_session_start_writes_state() {
 it "creates exactly one root session span"  t_session_start_creates_one_span
 it "span has correct name, id, and type"    t_session_start_span_shape
 it "span includes claude-code metadata"     t_session_start_metadata
+it "span includes minimal git metadata"     t_session_start_git_metadata
 it "persists session state for later hooks" t_session_start_writes_state
 
 # ---------------------------------------------------------------------------

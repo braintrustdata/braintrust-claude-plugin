@@ -209,6 +209,59 @@ it "returns a non-empty lowercase UUID"        t_uuid_format
 it "returns unique values on subsequent calls" t_uuid_unique
 
 # ---------------------------------------------------------------------------
+describe "git metadata helpers"
+# ---------------------------------------------------------------------------
+
+_make_git_repo() {
+    local dir
+    dir=$(mktemp -d)
+    git -C "$dir" init >/dev/null 2>&1
+    git -C "$dir" config user.email test@example.com
+    git -C "$dir" config user.name "Test User"
+    printf "hello\n" > "$dir/README.md"
+    git -C "$dir" add README.md
+    git -C "$dir" commit -m init >/dev/null 2>&1
+    git -C "$dir" branch -M main
+    git -C "$dir" remote add origin "https://token@github.com/acme/app.git"
+    echo "$dir"
+}
+
+t_git_remote_redaction() {
+    local redacted
+    redacted=$(redact_git_remote_url "https://token:secret@github.com/acme/app.git")
+    assert_eq "$redacted" "https://github.com/acme/app.git"
+
+    local ssh
+    ssh=$(redact_git_remote_url "git@github.com:acme/app.git")
+    assert_eq "$ssh" "git@github.com:acme/app.git"
+}
+
+t_git_metadata_json() {
+    local repo commit metadata
+    repo=$(_make_git_repo)
+    commit=$(git -C "$repo" rev-parse HEAD)
+    metadata=$(git_metadata_json "$repo")
+
+    assert_eq "$(echo "$metadata" | jq -r '.git_origin_url')" "https://github.com/acme/app.git"
+    assert_eq "$(echo "$metadata" | jq -r '.git_branch')" "main"
+    assert_eq "$(echo "$metadata" | jq -r '.git_commit_sha')" "$commit"
+
+    rm -rf "$repo"
+}
+
+t_git_metadata_json_not_git() {
+    local dir metadata
+    dir=$(mktemp -d)
+    metadata=$(git_metadata_json "$dir")
+    assert_eq "$metadata" "{}"
+    rm -rf "$dir"
+}
+
+it "redacts URL-style git remote credentials" t_git_remote_redaction
+it "captures origin, branch, and commit"      t_git_metadata_json
+it "omits fields outside a git repo"          t_git_metadata_json_not_git
+
+# ---------------------------------------------------------------------------
 describe "record_hook_input: event labeling and transcript snapshots"
 # ---------------------------------------------------------------------------
 

@@ -890,6 +890,47 @@ get_os() {
     uname -s 2>/dev/null || echo "unknown"
 }
 
+redact_git_remote_url() {
+    local remote="$1"
+    [ -z "$remote" ] && return 0
+
+    case "$remote" in
+        *://*@*)
+            local scheme="${remote%%://*}"
+            local rest="${remote#*://}"
+            echo "${scheme}://${rest#*@}"
+            ;;
+        *)
+            echo "$remote"
+            ;;
+    esac
+}
+
+git_metadata_json() {
+    local cwd="$1"
+    if [ -z "$cwd" ]; then
+        echo '{}'
+        return 0
+    fi
+
+    local origin branch commit
+    origin=$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" remote get-url origin 2>/dev/null || true)
+    branch=$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+    commit=$(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" rev-parse HEAD 2>/dev/null || true)
+
+    origin=$(redact_git_remote_url "$origin")
+
+    jq -cn \
+        --arg origin "$origin" \
+        --arg branch "$branch" \
+        --arg commit "$commit" \
+        '{
+            git_origin_url: $origin,
+            git_branch: $branch,
+            git_commit_sha: $commit
+        } | with_entries(select(.value != ""))'
+}
+
 # Version of this plugin, read from its plugin.json manifest. Cached after the
 # first lookup. Returns "unknown" if it can't be read.
 get_plugin_version() {
