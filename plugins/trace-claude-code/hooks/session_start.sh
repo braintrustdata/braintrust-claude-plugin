@@ -81,6 +81,7 @@ OS=$(get_os)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
 PLUGIN_VERSION=$(get_plugin_version)
 CLAUDE_CODE_VERSION=$(get_claude_code_version "$TRANSCRIPT_PATH")
+GIT_METADATA=$(git_metadata_json "$WORKSPACE")
 
 EVENT=$(jq -n \
     --arg id "$SPAN_ID" \
@@ -95,13 +96,14 @@ EVENT=$(jq -n \
     --arg os "$OS" \
     --arg plugin_version "$PLUGIN_VERSION" \
     --arg claude_code_version "$CLAUDE_CODE_VERSION" \
+    --argjson git_metadata "$GIT_METADATA" \
     '{
         id: $id,
         span_id: $span_id,
         root_span_id: $root_span_id,
         created: $created,
         input: ("Session: " + $workspace),
-        metadata: {
+        metadata: ({
             session_id: $session,
             workspace: $cwd,
             hostname: $hostname,
@@ -110,7 +112,7 @@ EVENT=$(jq -n \
             source: "claude-code",
             trace_claude_code_version: $plugin_version,
             claude_code_version: $claude_code_version
-        },
+        } + $git_metadata),
         span_attributes: {
             name: ("Claude Code: " + $workspace),
             type: "task"
