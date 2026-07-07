@@ -58,15 +58,18 @@ TOOL_TIME=$(date +%s)
 
 # Determine span name based on tool
 METADATA_TOOL_NAME="$TOOL_NAME"
-ORIGINAL_TOOL_NAME=""
 IS_SKILL_TOOL=false
 SKILL_NAME=""
+SKILL_LOAD_TRIGGER=""
 case "$TOOL_NAME" in
     Skill)
-        METADATA_TOOL_NAME="skill"
-        ORIGINAL_TOOL_NAME="$TOOL_NAME"
         IS_SKILL_TOOL=true
         SKILL_NAME=$(echo "$TOOL_INPUT" | jq -r '.name // .skill // .skill_name // .skillName // empty' 2>/dev/null)
+        EXPLICIT_SKILL_NAMES=$(get_session_state "$SESSION_ID" "current_turn_explicit_skill_names")
+        if [ -n "$SKILL_NAME" ] && [ -n "$EXPLICIT_SKILL_NAMES" ] && \
+            echo "$EXPLICIT_SKILL_NAMES" | jq -e --arg name "$SKILL_NAME" 'index($name) != null' >/dev/null 2>&1; then
+            SKILL_LOAD_TRIGGER="explicit"
+        fi
         if [ -n "$SKILL_NAME" ]; then
             SPAN_NAME="skill: $SKILL_NAME"
         else
@@ -105,8 +108,8 @@ EVENT=$(jq -n \
     --argjson output "$TOOL_OUTPUT" \
     --arg name "$SPAN_NAME" \
     --arg metadata_tool "$METADATA_TOOL_NAME" \
-    --arg original_tool "$ORIGINAL_TOOL_NAME" \
     --arg skill_name "$SKILL_NAME" \
+    --arg skill_load_trigger "$SKILL_LOAD_TRIGGER" \
     --argjson is_skill_tool "$IS_SKILL_TOOL" \
     --argjson start_time "$TOOL_TIME" \
     --argjson end_time "$TOOL_TIME" \
@@ -125,10 +128,11 @@ EVENT=$(jq -n \
         metadata: ({
             tool_name: $metadata_tool
         }
-        + (if $original_tool != "" then {original_tool_name: $original_tool} else {} end)
         + (if $is_skill_tool then {
+            tool_kind: "skill",
             skill_name: (if $skill_name != "" then $skill_name else null end)
-        } else {} end)),
+        } else {} end)
+        + (if $skill_load_trigger != "" then {skill_load_trigger: $skill_load_trigger} else {} end)),
         span_attributes: {
             name: $name,
             type: "tool"
