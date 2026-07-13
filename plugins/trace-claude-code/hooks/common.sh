@@ -400,6 +400,11 @@ _http_insert_span() {
     local project_id="$1"
     local event_json="$2"
 
+    event_json=$(add_span_origin_context "$event_json") || {
+        log "ERROR" "Insert aborted: failed to add span origin context"
+        return 1
+    }
+
     debug "Inserting span: $(echo "$event_json" | jq -c '.')"
 
     if [ -z "$API_KEY" ]; then
@@ -445,6 +450,50 @@ _http_insert_span() {
         log "WARN" "Insert returned empty row_ids: $resp"
         return 1
     fi
+}
+
+detect_span_origin_environment_json() {
+    if [ -n "${BRAINTRUST_ENVIRONMENT_TYPE:-}" ]; then
+        jq -nc \
+            --arg type "$BRAINTRUST_ENVIRONMENT_TYPE" \
+            --arg name "${BRAINTRUST_ENVIRONMENT_NAME:-}" \
+            '$ARGS.named | with_entries(select(.value != ""))'
+        return 0
+    fi
+    if [ -n "${GITHUB_ACTIONS:-}" ]; then jq -nc '{type:"ci", name:"github_actions"}'; return 0; fi
+    if [ -n "${GITLAB_CI:-}" ]; then jq -nc '{type:"ci", name:"gitlab_ci"}'; return 0; fi
+    if [ -n "${CIRCLECI:-}" ]; then jq -nc '{type:"ci", name:"circleci"}'; return 0; fi
+    if [ -n "${BUILDKITE:-}" ]; then jq -nc '{type:"ci", name:"buildkite"}'; return 0; fi
+    if [ -n "${CI:-}" ]; then jq -nc '{type:"ci", name:"ci"}'; return 0; fi
+    if [ -n "${VERCEL:-}" ]; then jq -nc '{type:"server", name:"vercel"}'; return 0; fi
+    if [ -n "${NETLIFY:-}" ]; then jq -nc '{type:"server", name:"netlify"}'; return 0; fi
+    if [ -n "${AWS_LAMBDA_FUNCTION_NAME:-}" ] || [ -n "${AWS_EXECUTION_ENV:-}" ]; then jq -nc '{type:"server", name:"aws_lambda"}'; return 0; fi
+    if [ "${NODE_ENV:-}" = "production" ] || [ "${NODE_ENV:-}" = "staging" ]; then
+        jq -nc --arg name "$NODE_ENV" '{type:"server", name:$name}'
+        return 0
+    fi
+    if [ "${NODE_ENV:-}" = "development" ] || [ "${NODE_ENV:-}" = "local" ]; then
+        jq -nc --arg name "$NODE_ENV" '{type:"local", name:$name}'
+        return 0
+    fi
+    jq -nc 'null'
+}
+
+add_span_origin_context() {
+    local event_json="$1"
+    local version environment
+    version=$(get_plugin_version)
+    environment=$(detect_span_origin_environment_json)
+    jq -c \
+        --arg version "$version" \
+        --argjson environment "$environment" \
+        '.context = ((.context // {}) + {
+            span_origin: ({
+                name: "braintrust.plugin.claude-code",
+                version: $version,
+                instrumentation: {name: "claude-code-hooks"}
+            } + (if $environment == null then {} else {environment: $environment} end))
+        })' <<< "$event_json"
 }
 
 ###
