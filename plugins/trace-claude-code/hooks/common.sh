@@ -453,7 +453,7 @@ _http_insert_span() {
 }
 
 detect_span_origin_environment_json() {
-    if [ -n "${BRAINTRUST_ENVIRONMENT_TYPE:-}" ]; then
+    if [ -n "${BRAINTRUST_ENVIRONMENT_TYPE:-}" ] || [ -n "${BRAINTRUST_ENVIRONMENT_NAME:-}" ]; then
         jq -nc \
             --arg type "$BRAINTRUST_ENVIRONMENT_TYPE" \
             --arg name "${BRAINTRUST_ENVIRONMENT_NAME:-}" \
