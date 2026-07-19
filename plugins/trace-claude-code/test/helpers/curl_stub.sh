@@ -86,7 +86,9 @@ curl() {
     local url=""
     local data=""
     local want_http_code=0
-    local arg
+    local auth_header_present=false
+    local auth_uses_configured_api_key=false
+    local arg header
 
     # Parse args. We handle the flags actually used by common.sh:
     #   -s          silent (ignore)
@@ -102,7 +104,18 @@ curl() {
             -s|--silent) shift ;;
             -f|--fail) shift ;;
             -X|--request) method="$2"; shift 2 ;;
-            -H|--header) shift 2 ;;
+            -H|--header)
+                header="$2"
+                case "$header" in
+                    Authorization:*|authorization:*|AUTHORIZATION:*)
+                        auth_header_present=true
+                        if [ "$header" = "Authorization: Bearer ${BRAINTRUST_API_KEY:-}" ]; then
+                            auth_uses_configured_api_key=true
+                        fi
+                        ;;
+                esac
+                shift 2
+                ;;
             -d|--data|--data-raw|--data-binary) data="$2"; shift 2 ;;
             -w|--write-out)
                 if [[ "$2" == *"%{http_code}"* ]]; then
@@ -148,7 +161,15 @@ curl() {
             --arg method "$method" \
             --arg url "$url" \
             --argjson data "$data_field" \
-            '{method: $method, url: $url, body: $data}' >> "$CAPTURED_REQUESTS"
+            --argjson auth_header_present "$auth_header_present" \
+            --argjson auth_uses_configured_api_key "$auth_uses_configured_api_key" \
+            '{
+                method: $method,
+                url: $url,
+                body: $data,
+                auth_header_present: $auth_header_present,
+                auth_uses_configured_api_key: $auth_uses_configured_api_key
+            }' >> "$CAPTURED_REQUESTS"
     fi
 
     # Find a matching response
