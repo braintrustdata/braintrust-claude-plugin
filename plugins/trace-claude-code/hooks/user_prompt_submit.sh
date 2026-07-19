@@ -16,11 +16,11 @@ check_requirements || exit 0
 # Read input from stdin
 INPUT=$(cat)
 record_hook_input "user_prompt_submit" "$INPUT"
-debug "UserPromptSubmit input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Extract session ID and prompt
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty' 2>/dev/null)
+debug "UserPromptSubmit payload received session=$SESSION_ID"
 
 [ -z "$SESSION_ID" ] && { debug "No session ID"; exit 0; }
 

@@ -16,13 +16,19 @@ check_requirements || exit 0
 # Read input from stdin
 INPUT=$(cat)
 record_hook_input "post_tool_use" "$INPUT"
-debug "PostToolUse input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Extract tool info
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null)
 TOOL_OUTPUT=$(echo "$INPUT" | jq -c '.tool_response // .output // {}' 2>/dev/null)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+
+# Sanitize captured telemetry before it can influence a span display name or
+# event body. enqueue_span() performs a second mandatory boundary scrub.
+TOOL_NAME=$(sanitize_text "$TOOL_NAME")
+TOOL_INPUT=$(sanitize_json "$TOOL_INPUT") || TOOL_INPUT='{}'
+TOOL_OUTPUT=$(sanitize_json "$TOOL_OUTPUT") || TOOL_OUTPUT='{}'
+debug "PostToolUse payload received tool=$TOOL_NAME session=$SESSION_ID"
 
 # Skip if no tool name
 [ -z "$TOOL_NAME" ] && { debug "No tool name, skipping"; exit 0; }
@@ -95,6 +101,7 @@ case "$TOOL_NAME" in
         SPAN_NAME="$TOOL_NAME"
         ;;
 esac
+SPAN_NAME=$(sanitize_text "$SPAN_NAME")
 
 # Build the event - tool is child of Turn
 EVENT=$(jq -n \

@@ -18,11 +18,11 @@ check_requirements || exit 0
 # Read input from stdin
 INPUT=$(cat)
 record_hook_input "session_end" "$INPUT"
-debug "SessionEnd input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Extract session ID. Claude Code always sends one; if it doesn't, there's
 # nothing we can drain (per-session queues are keyed by session id).
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+debug "SessionEnd payload received session=$SESSION_ID"
 [ -z "$SESSION_ID" ] && { debug "No session ID in payload, skipping"; exit 0; }
 
 # Log a one-line session summary for observability. State may be partial

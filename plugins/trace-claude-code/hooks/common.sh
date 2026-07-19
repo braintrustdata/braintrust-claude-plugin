@@ -49,8 +49,117 @@ mkdir -p "$(dirname "$CACHE_FILE")"
 mkdir -p "$SESSION_STATE_DIR"
 mkdir -p "$QUEUE_DIR"
 
-# Logging (defined early so other functions can use it)
-log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [$1] $2" >> "$LOG_FILE"; }
+# Telemetry sanitization
+#
+# These filters are centralized here so every hook, queue writer, worker, log,
+# and recording path uses the same rules. The final queue and HTTP boundaries
+# call sanitize_span_event() unconditionally; earlier calls keep secrets out of
+# display names and local diagnostic files as well.
+export BRAINTRUST_REDACTION_PLACEHOLDER="[REDACTED]"
+
+_SANITIZE_JQ_FILTER='
+    def sensitive_key:
+        ascii_downcase
+        | gsub("[^a-z0-9]+"; "_")
+        | gsub("^_+|_+$"; "")
+        | test("(^|_)(api_key|apikey|authorization|access_token|accesstoken|refresh_token|refreshtoken|token|secret|client_secret|clientsecret|password|passwd|credential|credentials)$");
+
+    def redact_configured_secret:
+        if ($configured_secret | length) > 0 then
+            split($configured_secret) | join("[REDACTED]")
+        else
+            .
+        end;
+
+    def redact_text:
+        redact_configured_secret
+        # PEM-encoded private keys, including RSA/EC/OpenSSH variants.
+        | gsub("(?s)-----BEGIN[[:space:]]+(?:[A-Z0-9]+[[:space:]]+)*PRIVATE[[:space:]]+KEY-----.*?-----END[[:space:]]+(?:[A-Z0-9]+[[:space:]]+)*PRIVATE[[:space:]]+KEY-----"; "[REDACTED]")
+        # Authorization headers.
+        | gsub("(?i)(?<prefix>authorization[[:space:]]*:[[:space:]]*bearer[[:space:]]+)(?:\\\"[^\\\"]*\\\"|\\x27[^\\x27]*\\x27|[^[:space:],;\\\"\\x27]+)"; "\(.prefix)[REDACTED]")
+        # Quoted and unquoted shell-style sensitive assignments. Requiring a
+        # complete sensitive suffix avoids matching words such as `monkey`.
+        | gsub("(?i)(?<prefix>(^|[^a-z0-9_])(?:export[[:space:]]+)?(?:[a-z][a-z0-9]*_)*(?:api_key|apikey|authorization|access_token|refresh_token|token|secret|client_secret|password|passwd|credential|credentials)[[:space:]]*=[[:space:]]*)(?:\\\"[^\\\"]*\\\"|\\x27[^\\x27]*\\x27|[^[:space:];,\\\"\\x27]+)"; "\(.prefix)[REDACTED]")
+        # Sensitive CLI options with either `--flag value` or `--flag=value`.
+        | gsub("(?i)(?<prefix>(^|[[:space:];])--(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|client[-_]?secret|password|passwd|credential|credentials)(?:[[:space:]]+|[[:space:]]*=[[:space:]]*))(?:\\\"[^\\\"]*\\\"|\\x27[^\\x27]*\\x27|[^[:space:];,\\\"\\x27]+)"; "\(.prefix)[REDACTED]")
+        # Standalone provider credential formats. The sk- rule requires a
+        # substantial token body so ordinary names such as `ask-user` and
+        # `task-status` remain intact; short values are still caught when
+        # they appear in known assignments or sensitive JSON fields.
+        | gsub("(?<prefix>(^|[^A-Za-z0-9_-]))sk-(?:(?:proj|svcacct|ant-api[0-9]+)-)?[A-Za-z0-9_=-]{16,}"; "\(.prefix)[REDACTED]")
+        | gsub("(?<prefix>(^|[^A-Za-z0-9_]))(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"; "\(.prefix)[REDACTED]")
+        | gsub("(?<prefix>(^|[^A-Za-z0-9-]))(?:xox[baprsce]|xapp)-[A-Za-z0-9-]{10,}"; "\(.prefix)[REDACTED]");
+
+    def sanitize_value:
+        if type == "object" then
+            with_entries(
+                if (.key | sensitive_key) then
+                    .value = "[REDACTED]"
+                else
+                    .value |= sanitize_value
+                end
+            )
+        elif type == "array" then
+            map(sanitize_value)
+        elif type == "string" then
+            # Tool-call arguments are often JSON serialized inside a string.
+            # Parse and recursively sanitize those values when possible, then
+            # restore their string representation for schema compatibility.
+            . as $text
+            | try (fromjson | sanitize_value | tojson)
+              catch ($text | redact_text)
+        else
+            .
+        end;
+'
+
+# Sanitize arbitrary free-form text. If jq is unavailable or a filter fails,
+# fail closed instead of writing the original value to a persistence surface.
+sanitize_text() {
+    local value="${1-}"
+    local sanitized
+    sanitized=$(printf '%s' "$value" | jq -Rrs \
+        --arg configured_secret "${API_KEY:-}" \
+        "${_SANITIZE_JQ_FILTER} redact_text" 2>/dev/null) || {
+        printf '%s\n' "$BRAINTRUST_REDACTION_PLACEHOLDER"
+        return 0
+    }
+    printf '%s\n' "$sanitized"
+}
+
+# Recursively sanitize JSON objects and arrays. Sensitive field names are
+# matched case-insensitively after punctuation normalization, while every
+# string value also receives the free-form credential filters above.
+sanitize_json() {
+    local value="${1-}"
+    printf '%s' "$value" | jq -c \
+        --arg configured_secret "${API_KEY:-}" \
+        "${_SANITIZE_JQ_FILTER} sanitize_value" 2>/dev/null
+}
+
+# Sanitize and validate a complete span event. Callers must treat failure as
+# fatal for that event; returning raw JSON would make the queue boundary
+# bypassable.
+sanitize_span_event() {
+    local event_json="${1-}"
+    printf '%s' "$event_json" | jq -c \
+        --arg configured_secret "${API_KEY:-}" \
+        "${_SANITIZE_JQ_FILTER}
+        if type == \"object\" then sanitize_value else error(\"span event must be an object\") end" \
+        2>/dev/null
+}
+
+# Logging is sanitized by default so normal, warning, error, and debug paths
+# cannot accidentally persist caller-controlled payloads or API responses.
+log() {
+    local level message
+    case "$1" in
+        DEBUG|INFO|WARN|ERROR) level="$1" ;;
+        *) level="INFO" ;;
+    esac
+    message=$(sanitize_text "$2")
+    printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message" >> "$LOG_FILE"
+}
 
 # Check if a value is truthy (true, 1, yes, on - case insensitive)
 is_truthy() {
@@ -88,12 +197,15 @@ record_hook_input() {
     ts=$(get_timestamp 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%S.000Z")
     events_file="$BRAINTRUST_RECORD_DIR/events.ndjson"
 
-    # Build the record. payload may already be valid JSON; if not, treat as string.
+    # Build the record. payload may already be valid JSON; if not, treat as a
+    # sanitized string. Never persist the original hook payload.
     local payload_field
     if [ -n "$payload" ] && echo "$payload" | jq -e . >/dev/null 2>&1; then
-        payload_field=$(echo "$payload" | jq -c .)
+        payload_field=$(sanitize_json "$payload") || return 0
     else
-        payload_field=$(jq -nc --arg p "$payload" '$p')
+        local sanitized_payload
+        sanitized_payload=$(sanitize_text "$payload")
+        payload_field=$(jq -nc --arg p "$sanitized_payload" '$p')
     fi
 
     # Always label the event with Claude Code's canonical event name. The
@@ -113,6 +225,7 @@ record_hook_input() {
         --arg hook "$hook_name" \
         --argjson payload "$payload_field" \
         '{ts: $ts, hook: $hook, payload: $payload}' 2>/dev/null) || return 0
+    record=$(sanitize_json "$record") || return 0
 
     # Atomic append: claim an exclusive lock via mkdir, write, release.
     # Parallel PostToolUse hooks can otherwise interleave bytes into the
@@ -167,7 +280,7 @@ record_hook_input() {
         return 0
     fi
 
-    # Snapshot any transcript files referenced by this event so the
+    # Snapshot sanitized transcript files referenced by this event so the
     # recording can be replayed deterministically. (Path rewriting from
     # absolute to fixture-relative happens at replay time in
     # test/helpers/replay.sh, not here; we only copy the files.)
@@ -185,9 +298,29 @@ record_hook_input() {
     _snapshot_transcript() {
         local src="$1"
         [ -n "$src" ] && [ -f "$src" ] || return 0
-        local base
-        base=$(basename "$src")
-        cp "$src" "$BRAINTRUST_RECORD_DIR/transcripts/$base" 2>/dev/null || true
+        local base dest tmp line sanitized_line
+        base=$(sanitize_text "$(basename "$src")")
+        [ -n "$base" ] || base="transcript.jsonl"
+        dest="$BRAINTRUST_RECORD_DIR/transcripts/$base"
+        tmp="${dest}.tmp.$$"
+        : > "$tmp" 2>/dev/null || return 0
+
+        # Transcript fixtures are JSONL. Sanitize each object recursively;
+        # malformed lines fail closed to the text sanitizer instead of being
+        # copied verbatim.
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [ -n "$line" ] && printf '%s' "$line" | jq -e . >/dev/null 2>&1; then
+                sanitized_line=$(sanitize_json "$line") || sanitized_line="$BRAINTRUST_REDACTION_PLACEHOLDER"
+            else
+                sanitized_line=$(sanitize_text "$line")
+            fi
+            printf '%s\n' "$sanitized_line" >> "$tmp" 2>/dev/null || {
+                rm -f "$tmp"
+                return 0
+            }
+        done < "$src"
+
+        mv "$tmp" "$dest" 2>/dev/null || rm -f "$tmp"
     }
 
     case "$hook_name" in
@@ -256,7 +389,7 @@ resolve_api_url() {
     fi
 
     if [ "$http_code" != "200" ]; then
-        log "WARN" "Braintrust login endpoint returned HTTP $http_code at $APP_URL/api/apikey/login: $resp"
+        log "WARN" "Braintrust login endpoint returned HTTP $http_code at $APP_URL/api/apikey/login"
     fi
 
     local api_url
@@ -328,7 +461,7 @@ get_project_id() {
     resp=$(echo "$resp" | sed '$d')
 
     if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
-        log "ERROR" "Braintrust authentication failed (HTTP $http_code) - BRAINTRUST_API_KEY is invalid, expired, or lacks permission. Get a new key at $APP_URL/app/settings?subroute=api-keys and set BRAINTRUST_API_KEY. Response: $resp"
+        log "ERROR" "Braintrust authentication failed (HTTP $http_code) - BRAINTRUST_API_KEY is invalid, expired, or lacks permission. Get a new key at $APP_URL/app/settings?subroute=api-keys and set BRAINTRUST_API_KEY"
         return 1
     fi
 
@@ -342,7 +475,7 @@ get_project_id() {
     fi
 
     if [ "$http_code" != "200" ] && [ "$http_code" != "404" ]; then
-        log "WARN" "Project lookup returned HTTP $http_code at $api_url/v1/project: $resp"
+        log "WARN" "Project lookup returned HTTP $http_code at $api_url/v1/project"
     fi
 
     # Create project. Build the JSON body with jq so any special chars
@@ -357,7 +490,7 @@ get_project_id() {
     resp=$(echo "$resp" | sed '$d')
 
     if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
-        log "ERROR" "Braintrust authentication failed (HTTP $http_code) while creating project '$name' - BRAINTRUST_API_KEY is invalid, expired, or lacks permission. Get a new key at $APP_URL/app/settings?subroute=api-keys. Response: $resp"
+        log "ERROR" "Braintrust authentication failed (HTTP $http_code) while creating project '$name' - BRAINTRUST_API_KEY is invalid, expired, or lacks permission. Get a new key at $APP_URL/app/settings?subroute=api-keys"
         return 1
     fi
 
@@ -369,7 +502,7 @@ get_project_id() {
         return 0
     fi
 
-    log "ERROR" "Failed to create project '$name' (HTTP $http_code) at $api_url/v1/project: $resp"
+    log "ERROR" "Failed to create project '$name' (HTTP $http_code) at $api_url/v1/project"
     return 1
 }
 
@@ -404,8 +537,20 @@ _http_insert_span() {
         log "ERROR" "Insert aborted: failed to add span origin context"
         return 1
     }
+    # Mandatory final outbound scrub. This also protects jobs written by an
+    # older plugin version and future callers that forget earlier sanitizers.
+    event_json=$(sanitize_span_event "$event_json") || {
+        log "ERROR" "Insert aborted: event sanitization failed"
+        return 1
+    }
 
-    debug "Inserting span: $(echo "$event_json" | jq -c '.')"
+    if is_truthy "$DEBUG"; then
+        local debug_span_id debug_span_name debug_span_type
+        debug_span_id=$(echo "$event_json" | jq -r '.span_id // .id // "unknown"' 2>/dev/null)
+        debug_span_name=$(echo "$event_json" | jq -r '.span_attributes.name // "unnamed"' 2>/dev/null)
+        debug_span_type=$(echo "$event_json" | jq -r '.span_attributes.type // "unknown"' 2>/dev/null)
+        debug "Inserting span id=$debug_span_id name=$debug_span_name type=$debug_span_type"
+    fi
 
     if [ -z "$API_KEY" ]; then
         log "ERROR" "API_KEY is empty - check BRAINTRUST_API_KEY env var"
@@ -436,7 +581,7 @@ _http_insert_span() {
     resp=$(echo "$resp" | sed '$d')
 
     if [ "$http_code" != "200" ]; then
-        log "ERROR" "Insert failed (HTTP $http_code) to $endpoint: $resp"
+        log "ERROR" "Insert failed (HTTP $http_code) to $endpoint"
         return 1
     fi
 
@@ -447,7 +592,7 @@ _http_insert_span() {
         echo "$row_id"
         return 0
     else
-        log "WARN" "Insert returned empty row_ids: $resp"
+        log "WARN" "Insert returned empty row_ids"
         return 1
     fi
 }
@@ -584,6 +729,13 @@ enqueue_span() {
         log "ERROR" "enqueue_span called without session_id"
         return 1
     fi
+
+    # Mandatory persistence-boundary scrub. The queue never receives a raw
+    # span event, even when a hook omits earlier sanitization.
+    event_json=$(sanitize_span_event "$event_json") || {
+        log "ERROR" "enqueue_span rejected an invalid span event"
+        return 1
+    }
 
     # Build the job JSON
     local job
@@ -1174,6 +1326,7 @@ emit_llm_spans_from_transcript() {
     local dir
     while IFS= read -r dir; do
         [ -z "$dir" ] && continue
+        dir=$(sanitize_json "$dir") || continue
 
         local kind ts epoch span_id
         kind=$(echo "$dir" | jq -r '.kind')
@@ -1281,24 +1434,28 @@ emit_llm_spans_from_transcript() {
 _subagent_tool_span_name() {
     local tool_name="$1"
     local tool_input="$2"
+    tool_name=$(sanitize_text "$tool_name")
+    tool_input=$(sanitize_json "$tool_input") || tool_input='{}'
+    local span_name
     case "$tool_name" in
         Read|Write|Edit|MultiEdit)
             local fp
             fp=$(echo "$tool_input" | jq -r '(. | (try fromjson catch .)) | (.file_path // .path // empty)' 2>/dev/null)
-            [ -n "$fp" ] && echo "$tool_name: $(basename "$fp")" || echo "$tool_name"
+            [ -n "$fp" ] && span_name="$tool_name: $(basename "$fp")" || span_name="$tool_name"
             ;;
         Bash|Terminal)
             local cmd
             cmd=$(echo "$tool_input" | jq -r '(. | (try fromjson catch .)) | (.command // empty)' 2>/dev/null | head -c 50)
-            echo "Terminal: ${cmd:-command}"
+            span_name="Terminal: ${cmd:-command}"
             ;;
         mcp__*)
-            echo "$tool_name" | sed 's/mcp__/MCP: /' | sed 's/__/ - /'
+            span_name=$(echo "$tool_name" | sed 's/mcp__/MCP: /' | sed 's/__/ - /')
             ;;
         *)
-            echo "$tool_name"
+            span_name="$tool_name"
             ;;
     esac
+    sanitize_text "$span_name"
 }
 
 # Convert an ISO-8601 timestamp (UTC, e.g. 2026-06-11T03:01:33.000Z) to a

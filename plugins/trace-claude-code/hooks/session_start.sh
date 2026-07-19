@@ -17,7 +17,7 @@ check_requirements || exit 0
 # Read input from stdin
 INPUT=$(cat)
 record_hook_input "session_start" "$INPUT"
-debug "SessionStart input: $INPUT"
+debug "SessionStart payload received"
 
 # Extract session ID from input
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)

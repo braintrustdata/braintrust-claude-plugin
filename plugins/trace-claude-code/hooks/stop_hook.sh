@@ -40,7 +40,6 @@ check_requirements || exit 0
 # Read input from stdin
 INPUT=$(cat)
 record_hook_input "stop_hook" "$INPUT"
-debug "Stop input: $(echo "$INPUT" | jq -c '.' 2>/dev/null | head -c 500)"
 
 # Get session ID
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
@@ -58,6 +57,8 @@ fi
 # payload, so we don't have to reconstruct it from the transcript.
 # (See https://docs.claude.com/en/docs/claude-code/hooks -> Stop input)
 LAST_ASSISTANT_MESSAGE=$(echo "$INPUT" | jq -r '.last_assistant_message // empty' 2>/dev/null)
+LAST_ASSISTANT_MESSAGE=$(sanitize_text "$LAST_ASSISTANT_MESSAGE")
+debug "Stop payload received session=$SESSION_ID"
 
 # Get session state
 ROOT_SPAN_ID=$(get_session_state "$SESSION_ID" "root_span_id")
@@ -143,6 +144,11 @@ add_to_history() {
     local content="$2"
     local tool_call_id="$3"
     local tool_calls="$4"
+
+    content=$(sanitize_text "$content")
+    if [ -n "$tool_calls" ] && [ "$tool_calls" != "[]" ]; then
+        tool_calls=$(sanitize_json "$tool_calls") || tool_calls='[]'
+    fi
 
     if [ "$role" = "tool" ]; then
         CONVERSATION_HISTORY=$(echo "$CONVERSATION_HISTORY" | jq --arg role "$role" --arg content "$content" --arg id "$tool_call_id" \
@@ -375,6 +381,7 @@ while IFS= read -r line; do
                 empty
               end
         ' 2>/dev/null)
+        TEXT=$(sanitize_text "$TEXT")
 
         # Extract full tool_use objects for tool_calls
         TOOL_CALLS_JSON=$(echo "$line" | jq -c '
@@ -392,6 +399,7 @@ while IFS= read -r line; do
                 []
               end
         ' 2>/dev/null)
+        TOOL_CALLS_JSON=$(sanitize_json "${TOOL_CALLS_JSON:-[]}") || TOOL_CALLS_JSON='[]'
 
         # Check if we have tool calls
         HAS_TOOL_CALLS=$(echo "$TOOL_CALLS_JSON" | jq 'length > 0' 2>/dev/null)
