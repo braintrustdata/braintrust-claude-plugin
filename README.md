@@ -42,6 +42,17 @@ $HOME/.claude/plugins/marketplaces/braintrust-claude-plugin/plugins/trace-claude
 
 Traces are sent to the `claude-code` project by default.
 
+#### Telemetry sanitization
+
+Captured telemetry is sanitized before it is queued or sent to Braintrust and
+before hook payloads, transcript fixtures, or diagnostic messages are written
+locally. The sanitizer redacts sensitive JSON fields, shell environment
+assignments, credential CLI flags, bearer authorization headers, common
+Braintrust/OpenAI/Anthropic, GitHub, and Slack token formats, and PEM private
+keys. Sanitized values use the `[REDACTED]` placeholder. The configured
+`BRAINTRUST_API_KEY` is still used unchanged for the transport Authorization
+header and is not included in telemetry.
+
 #### manual configuration
 
 Instead of running `setup.sh`, you can manually edit `~/.claude/settings.json` or your project's `.claude/settings.local.json`:
