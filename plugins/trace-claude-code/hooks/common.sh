@@ -1109,7 +1109,8 @@ emit_llm_spans_from_transcript() {
             | { kind: "tool",
                 tool_use_id: $c[0].tool_use_id,
                 ts: .timestamp,
-                output: ($c[0].content) } ];
+                output: ($c[0].content),
+                is_error: ($c[0].is_error // false) } ];
 
         (assistant_calls) as $llms
         | (tool_results) as $tools
@@ -1152,9 +1153,11 @@ emit_llm_spans_from_transcript() {
             | ( [ $resolved[] | {
                     kind: "tool",
                     ts: .res.ts,
+                    tool_use_id: .res.tool_use_id,
                     name: .tc.function.name,
                     input: (.tc.function.arguments),
-                    output: (.res.output)
+                    output: (.res.output),
+                    is_error: (.res.is_error // false)
                   } ] ) as $tool_dirs
             # History additions: the assistant message, then each tool result.
             | ( [ $assistant_msg ]
@@ -1261,9 +1264,14 @@ emit_llm_spans_from_transcript() {
                     input: (.input | (try fromjson catch .)),
                     output: .output,
                     metrics: { start: $epoch, end: $epoch },
-                    metadata: { tool_name: $tool },
+                    metadata: {
+                        tool_name: $tool,
+                        tool_call_id: .tool_use_id,
+                        tool_approval: "approved"
+                    },
                     span_attributes: { name: $name, type: "tool" }
-                }')
+                }
+                + (if .is_error then {error: (.output|tostring)} else {} end)')
         fi
 
         if [ -n "$event" ] && enqueue_span "$session_id" "$project_id" "$event"; then

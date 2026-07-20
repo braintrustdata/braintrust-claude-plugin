@@ -52,6 +52,41 @@ fixture_post_tool_use() {
         '{session_id: $s, tool_name: $t, tool_input: $i, tool_response: $r}'
 }
 
+# PostToolUseFailure payload
+#
+# Args: session_id tool_name tool_input_json error [tool_response_json]
+fixture_post_tool_use_failure() {
+    local session_id="$1"
+    local tool_name="$2"
+    local tool_input="$3"      # JSON object
+    local error="$4"
+    local tool_response="${5:-}"
+    [ -z "$tool_response" ] && tool_response="{}"
+    jq -nc \
+        --arg s "$session_id" \
+        --arg t "$tool_name" \
+        --arg e "$error" \
+        --argjson i "$tool_input" \
+        --argjson r "$tool_response" \
+        '{session_id: $s, tool_name: $t, tool_input: $i, tool_response: $r, error: $e}'
+}
+
+# PermissionDenied payload
+#
+# Args: session_id tool_name tool_input_json [tool_use_id]
+fixture_permission_denied() {
+    local session_id="$1"
+    local tool_name="$2"
+    local tool_input="$3"      # JSON object
+    local tool_use_id="${4:-}"
+    jq -nc \
+        --arg s "$session_id" \
+        --arg t "$tool_name" \
+        --arg tuid "$tool_use_id" \
+        --argjson i "$tool_input" \
+        '{session_id: $s, tool_name: $t, tool_input: $i} + (if $tuid != "" then {tool_use_id: $tuid} else {} end)'
+}
+
 # Stop payload - includes the transcript path and optionally the
 # last assistant message that Claude Code provides in real Stop events.
 #
