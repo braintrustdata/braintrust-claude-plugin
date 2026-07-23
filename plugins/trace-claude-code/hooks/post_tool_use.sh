@@ -23,6 +23,29 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
 TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}' 2>/dev/null)
 TOOL_OUTPUT=$(echo "$INPUT" | jq -c '.tool_response // .output // {}' 2>/dev/null)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+TOOL_CALL_ID=$(echo "$INPUT" | jq -r '.tool_use_id // empty' 2>/dev/null)
+TOOL_FAILED=$(echo "$INPUT" | jq -r '
+    if ((.tool_response.interrupted // false) == true
+        or (.tool_response.is_error // false) == true
+        or (.tool_response.isError // false) == true
+        or (.tool_response.status // "") == "error"
+        or (.tool_response.status // "") == "failed"
+        or (.tool_response.error != null)) then
+        true
+    else
+        false
+    end
+' 2>/dev/null)
+if [ "$TOOL_FAILED" != "true" ]; then
+    TOOL_FAILED=false
+fi
+TOOL_ERROR=$(echo "$INPUT" | jq -r '
+    .tool_response.error
+    // .tool_response.stderr
+    // .tool_response.message
+    // .tool_response.output
+    // "Tool execution failed"
+' 2>/dev/null | head -n 1)
 
 # Skip if no tool name
 [ -z "$TOOL_NAME" ] && { debug "No tool name, skipping"; exit 0; }
@@ -108,6 +131,9 @@ EVENT=$(jq -n \
     --argjson output "$TOOL_OUTPUT" \
     --arg name "$SPAN_NAME" \
     --arg metadata_tool "$METADATA_TOOL_NAME" \
+    --arg tool_call_id "$TOOL_CALL_ID" \
+    --arg tool_error "$TOOL_ERROR" \
+    --argjson tool_failed "$TOOL_FAILED" \
     --arg skill_name "$SKILL_NAME" \
     --arg skill_load_trigger "$SKILL_LOAD_TRIGGER" \
     --argjson is_skill_tool "$IS_SKILL_TOOL" \
@@ -126,8 +152,10 @@ EVENT=$(jq -n \
             end: $end_time
         },
         metadata: ({
-            tool_name: $metadata_tool
+            tool_name: $metadata_tool,
+            tool_approval: "approved"
         }
+        + (if $tool_call_id != "" then {tool_call_id: $tool_call_id} else {} end)
         + (if $is_skill_tool then {
             tool_kind: "skill",
             skill_name: (if $skill_name != "" then $skill_name else null end)
@@ -137,7 +165,8 @@ EVENT=$(jq -n \
             name: $name,
             type: "tool"
         }
-    }')
+    }
+    + (if $tool_failed then {error: $tool_error} else {} end)')
 
 enqueue_span "$SESSION_ID" "$PROJECT_ID" "$EVENT" || { log "ERROR" "Failed to enqueue tool span"; exit 0; }
 

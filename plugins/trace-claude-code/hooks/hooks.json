@@ -108,7 +108,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PermissionDenied",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/permission_denied.sh",
             "async": false
           }
         ]
@@ -120,7 +120,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PostToolUseFailure",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use_failure.sh",
             "async": false
           }
         ]
