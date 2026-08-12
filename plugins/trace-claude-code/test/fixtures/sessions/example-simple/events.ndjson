@@ -1,5 +1,0 @@
-{"ts":"2026-05-26T10:00:00.000Z","hook":"SessionStart","payload":{"session_id":"example-sess-001","cwd":"/tmp/example","hook_event_name":"SessionStart"}}
-{"ts":"2026-05-26T10:00:01.000Z","hook":"UserPromptSubmit","payload":{"session_id":"example-sess-001","prompt":"What files are here?","cwd":"/tmp/example","hook_event_name":"UserPromptSubmit"}}
-{"ts":"2026-05-26T10:00:03.000Z","hook":"PostToolUse","payload":{"session_id":"example-sess-001","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"output":"a.txt\nb.txt"},"hook_event_name":"PostToolUse"}}
-{"ts":"2026-05-26T10:00:04.000Z","hook":"PostToolUse","payload":{"session_id":"example-sess-001","tool_name":"Read","tool_input":{"file_path":"/tmp/example/a.txt"},"tool_response":{"output":"hello"},"hook_event_name":"PostToolUse"}}
-{"ts":"2026-05-26T10:00:06.000Z","hook":"SessionEnd","payload":{"session_id":"example-sess-001","hook_event_name":"SessionEnd"}}

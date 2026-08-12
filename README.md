@@ -10,7 +10,7 @@ A Claude Code plugin marketplace for [Braintrust](https://braintrust.dev) integr
 ## Prerequisites
 
 - A [Braintrust account](https://braintrust.dev)
-- `BRAINTRUST_API_KEY` exported in your environment
+- The `bt` CLI, authenticated with `bt login`
 
 ## Installation
 
@@ -37,74 +37,17 @@ claude plugin install braintrust@braintrust-claude-plugin
 
 ### trace-claude-code
 
-Automatically traces Claude Code conversations to Braintrust. Captures sessions, conversation turns, and tool calls as hierarchical traces.
+Automatically traces Claude Code conversations to Braintrust through the shared
+Braintrust daemon. The plugin contains only a fail-open hook forwarder; `bt`
+owns authentication, trace construction, and delivery.
 
 ```bash
-claude plugin install trace-claude-code@braintrust-claude-plugin
-# run the setup script to confgure tracing
-$HOME/.claude/plugins/marketplaces/braintrust-claude-plugin/plugins/trace-claude-code/setup.sh
+bt trace setup claude --project my-coding-agent
 ```
 
-Traces are sent to the `claude-code` project by default.
+Use `--profile` or `--org` when needed. Setup stores only non-secret routing
+settings under `~/.claude/braintrust.json`. Restart Claude Code after setup.
 
-#### manual configuration
-
-Instead of running `setup.sh`, you can manually edit `~/.claude/settings.json` or your project's `.claude/settings.local.json`:
-
-```json
-{
-  "env": {
-    "TRACE_TO_BRAINTRUST": "true",
-    "BRAINTRUST_CC_PROJECT": "project-name-to-send-cc-traces-to",
-    "BRAINTRUST_API_KEY": "sk-yourkey",
-    "BRAINTRUST_DEBUG": "false"
-  }
-}
-```
-
-#### add claude code trace to an existing trace
-
-You can attach a Claude Code session to an existing Braintrust trace by passing `CC_PARENT_SPAN_ID`:
-
-```bash
-claude --settings '{"env":{"CC_PARENT_SPAN_ID":"your-parent-span-id"}}' -p "task"
-```
-
-If the parent span is not the trace root, also pass `CC_ROOT_SPAN_ID`:
-
-```bash
-claude --settings '{"env":{"CC_PARENT_SPAN_ID":"parent-span-id","CC_ROOT_SPAN_ID":"root-span-id"}}' -p "task"
-```
-
-The Claude Code session and all its turns/tools will appear as children of your parent span in Braintrust.
-
-To attach claude code to an experiment's trace, specify CC_EXPERIMENT_ID as well:
-
-```bash
-claude --settings '{"env":{"CC_PARENT_SPAN_ID":"parent-span-id","CC_ROOT_SPAN_ID":"root-span-id", "CC_EXPERIMENT_ID":"the-experiment-id"}}' -p "task"
-```
-
-#### token accounting
-
-The plugin derives token usage from the conversation transcript that Claude Code
-writes. For every model request that appears in the transcript — the main
-conversation and sub-agents alike — the traced token counts match Claude Code's
-own `/usage` exactly and are emitted with Braintrust's canonical metric names.
-
-For Anthropic usage, `prompt_tokens` is inclusive: Claude Code's
-`input_tokens` plus cache-read tokens plus cache-write tokens. Cache reads are
-also emitted as `prompt_cached_tokens`. Cache writes are emitted as
-`prompt_cache_creation_5m_tokens` / `prompt_cache_creation_1h_tokens` when
-Claude Code includes the Anthropic TTL breakdown, or as
-`prompt_cache_creation_tokens` when only the legacy aggregate is present. This
-is the shape Braintrust's backend uses to compute cost.
-
-There is one known and unavoidable exception: **Claude Code's internal background
-model calls** (most notably the automatic **session-title generation**, and
-conversation summarization). These calls are billed and counted in `/usage`, but
-Claude Code records only their result (e.g. an `ai-title` entry) in the
-transcript — never a request id, model, or token usage — and they are not exposed
-through any hook. Because the plugin has no data source for these tokens, traced
-totals for an interactive session can read slightly below `/usage` (typically a
-small amount of opus cache-read tokens for the title call). Non-interactive
-(`-p`) sessions do not make these background calls and reconcile exactly.
+Every registered lifecycle event is forwarded synchronously to
+`bt trace hook --source claude-code`, preserving per-session ordering. Hook
+failures never fail a Claude Code turn.

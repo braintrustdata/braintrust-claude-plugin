@@ -21,7 +21,7 @@ claude-plugin/
 | Plugin | Description |
 |--------|-------------|
 | `braintrust` | Enables AI agents to use Braintrust for LLM evaluation, logging, and observability. Includes MCP server config and the `troubleshoot-braintrust-mcp` skill. |
-| `trace-claude-code` | Automatically traces Claude Code conversations to Braintrust. Uses hooks to capture sessions, turns, and tool calls. |
+| `trace-claude-code` | Forwards Claude Code lifecycle hooks to `bt trace hook --source claude-code`; the shared daemon builds and delivers traces. |
 
 ### Terminology
 

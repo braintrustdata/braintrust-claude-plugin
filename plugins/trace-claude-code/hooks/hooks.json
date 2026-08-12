@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -16,63 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt_submit.sh",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use.sh",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop_hook.sh",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session_end.sh",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "Setup": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh Setup",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "UserPromptExpansion": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/user_prompt_expansion.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -84,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PreToolUse",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -96,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PermissionRequest",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -108,7 +52,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/permission_denied.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -120,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use_failure.sh",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -131,30 +87,29 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PostToolBatch",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
       }
     ],
-    "Notification": [
+    "PreCompact": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh Notification",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
       }
     ],
-    "MessageDisplay": [
+    "PostCompact": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh MessageDisplay",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -166,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh SubagentStart",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -178,29 +133,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh SubagentStop",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
       }
     ],
-    "TaskCreated": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh TaskCreated",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh TaskCompleted",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -212,7 +156,85 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh StopFailure",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "Setup": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "TaskCreated": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -223,7 +245,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh TeammateIdle",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -235,7 +257,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh InstructionsLoaded",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -247,7 +269,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh ConfigChange",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -258,7 +280,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh CwdChanged",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
+            "async": false
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -269,7 +302,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh WorktreeCreate",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -280,31 +313,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh WorktreeRemove",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PreCompact",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh PostCompact",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -312,11 +321,10 @@
     ],
     "Elicitation": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh Elicitation",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]
@@ -324,23 +332,10 @@
     ],
     "ElicitationResult": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh ElicitationResult",
-            "async": false
-          }
-        ]
-      }
-    ],
-    "FileChanged": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/record_event.sh FileChanged",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/forward.sh\"",
             "async": false
           }
         ]

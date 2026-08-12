@@ -3,7 +3,7 @@
   "name": "braintrust",
   "displayName": "Braintrust",
   "description": "Enables AI agents to use Braintrust for LLM evaluation, logging, and observability. Provides correct API usage, working examples, and helper scripts for common operations.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": {
     "name": "Braintrust",
     "email": "support@braintrust.dev",

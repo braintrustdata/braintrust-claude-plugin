@@ -1,7 +1,7 @@
 {
   "name": "trace-claude-code",
   "description": "Automatically trace Claude Code conversations to Braintrust for observability. Captures sessions, conversation turns, and tool calls as hierarchical traces.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": {
     "name": "Braintrust"
   }
