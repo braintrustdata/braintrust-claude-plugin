@@ -1,5 +1,10 @@
 # Braintrust Claude Code Marketplace
 
+> **This repository is generated.** It is built from
+> [braintrustdata/braintrust-coding-agent-plugins](https://github.com/braintrustdata/braintrust-coding-agent-plugins).
+> Don't edit files here — make changes and file issues in that repository, and they
+> will be rebuilt into this one.
+
 A Claude Code plugin marketplace for [Braintrust](https://braintrust.dev) integration - LLM evaluation, logging, observability, and session tracing.
 
 ## Prerequisites
