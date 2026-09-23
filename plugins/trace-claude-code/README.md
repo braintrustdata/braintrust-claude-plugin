@@ -7,10 +7,10 @@ bt trace hook --source claude-code
 ```
 
 Use `bt trace enable claude --project <project>` to install and configure it.
-The hook first installs the `bt` CLI with the official installer when it is not
-already available, then forwards the event. The plugin is credential-free and
-fail-open; the `bt` CLI and shared daemon own authentication, event journaling,
-trace construction, and delivery.
+Claude Code directly executes the configured `bt` CLI for each hook; it does
+not launch a shell or an intermediate forwarding script. The plugin is
+credential-free; the `bt` CLI and shared daemon own authentication, event
+journaling, trace construction, and delivery.
 
 ## Supported surfaces
 
@@ -25,3 +25,17 @@ To add fields to each root trace span, pass a JSON object (as
 `bt trace run claude` for one invocation. The hook itself never reads that
 environment variable — only `bt trace enable`, `bt trace run`, and
 `bt trace import` do.
+
+## Tags and diagnostics
+
+Use repeatable `--tag` flags for filterable root-span tags. Inspect the effective
+configuration with `doctor` and delivery state with `status`:
+
+```bash
+bt trace enable claude --tag coding-agent --tag development
+bt trace doctor claude
+bt trace status
+```
+
+See the [distribution guide](../../README.md) for installation, one-off runs,
+transcript import, updates, and disablement.
