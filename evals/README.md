@@ -16,6 +16,8 @@ In the generated Claude distribution repository, use `cd evals` instead.
 Set `ANTHROPIC_API_KEY` for model calls and `BRAINTRUST_API_KEY` for reporting.
 These evaluations use live services and write results to Braintrust.
 
+Lint and type-checking tools are optional; install them with `uv sync --group dev`.
+
 ## Run evaluations
 
 From the `evals` directory:

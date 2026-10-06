@@ -27,7 +27,7 @@ repos:
     hooks:
       - id: ty
         name: ty type checker
-        entry: uv run ty check .
+        entry: uv run --project evals --group dev ty check evals
         language: system
         types: [python]
         pass_filenames: false
