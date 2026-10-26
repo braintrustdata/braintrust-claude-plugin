@@ -1,0 +1,8 @@
+{
+  "name": "trace-claude-code",
+  "description": "Claude Code tracing only. Use the Braintrust Cursor plugin for Cursor tracing.",
+  "hooks": {
+    "version": 1,
+    "hooks": {}
+  }
+}

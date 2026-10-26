@@ -15,6 +15,11 @@ journaling, trace construction, and delivery.
 ## Supported surfaces
 
 This plugin supports Claude Code CLI and Claude Code mode in the desktop app.
+Cursor automatically imports installed Claude plugins when third-party imports
+are enabled. This plugin includes a Cursor manifest with no hooks so that
+Cursor uses the native Braintrust Cursor integration for tracing. Enable that
+integration with `bt trace enable cursor --project <project>`.
+
 It does not support the Cowork tab. Cowork executes hooks in a separate VM that
 does not inherit the host's `bt` binary, saved Braintrust route, or credentials,
 so installing this plugin there does not enable tracing.
