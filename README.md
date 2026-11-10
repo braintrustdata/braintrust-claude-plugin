@@ -11,7 +11,7 @@ A Claude Code plugin marketplace for tracing Claude Code sessions to [Braintrust
 
 - A [Braintrust account](https://braintrust.dev)
 - Claude Code
-- The [Braintrust CLI](https://www.braintrust.dev/docs/reference/cli/quickstart)
+- The [Braintrust CLI](https://docs.braintrust.dev/reference/cli/quickstart)
 
 ## Supported Claude surfaces
 
